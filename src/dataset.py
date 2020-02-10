@@ -43,6 +43,7 @@ class KarjusData(torch.utils.data.IterableDataset):
         self,
         selection_prior=None,
         start=0.5,
+        nbins=25,
         n_simulations=1000,
         n_individuals=1000,
         timesteps=200,
@@ -56,7 +57,7 @@ class KarjusData(torch.utils.data.IterableDataset):
         self.n_individuals = n_individuals
         self.timesteps = timesteps
         self.rnd = np.random.RandomState(seed)
-        self.bins = 2**np.arange(1 + np.log2(200))[2:]
+        self.bins = np.array([x[0] for x in np.array_split(np.arange(4, self.timesteps), nbins)])
         self.bins[-1] = timesteps
 
     def __iter__(self):
