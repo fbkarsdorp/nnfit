@@ -27,7 +27,7 @@ def worker_init_fn(_):
 
 
 def collate(data):
-    inputs, outputs = zip(*data)
+    labels, selection, bins, outputs = zip(*data)
     lengths = torch.LongTensor([output.size(1) for output in outputs])
     length = lengths.max().item()
     padded_outputs = []
@@ -35,10 +35,10 @@ def collate(data):
         padded_outputs.append(
             F.pad(output, (0, length - output.size(1)), "constant", 0)
         )
-    return inputs, torch.stack(padded_outputs)
+    return torch.tensor(inputs), selection, bins, torch.stack(padded_outputs)
 
 
-class KarjusData(torch.utils.data.IterableDataset):
+class SimulationData(torch.utils.data.IterableDataset):
     def __init__(
         self,
         selection_prior=None,
@@ -79,12 +79,7 @@ class KarjusData(torch.utils.data.IterableDataset):
             n_bins = self.rnd.choice(self.bins)
             binning = np.array_split(np.arange(self.timesteps), n_bins)
             j = np.array([j[ii].sum() for ii in binning])
-            return {
-                "bias": biased,
-                "selection": s,
-                "bins": n_bins,
-                "data": j / np.array([self.n_individuals * len(b) for b in binning])
-            }
+            return biases, s, n_bins, data
         raise StopIteration
 
 
