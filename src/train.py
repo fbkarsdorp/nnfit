@@ -6,19 +6,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 
 from sklearn.metrics import accuracy_score
 
 from nets import FCN
-from dataset import SimulationData, worker_init_fn, collate
+from dataset import SimulationData, DataLoader
 
 
 class Trainer:
-    def __init__(self, model, train_loader, val_loader):
+    def __init__(self, model, train_loader, val_loader, device="cpu"):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.device = device
         self.train_loss = []
         self.val_loss = []
         self.val_scores = []
@@ -35,7 +35,10 @@ class Trainer:
         for epoch in range(n_epochs):
 
             train_loss = []
-            for labels, inputs in self.train_loader:
+            for labels, _, _, inputs in self.train_loader:
+                if not train_loss:
+                    print(inputs)
+                labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
                 optimizer.zero_grad()
                 outputs = self.model(inputs)
                 loss = F.binary_cross_entropy_with_logits(
@@ -48,8 +51,11 @@ class Trainer:
 
             val_loss, y_true, y_pred = [], [], []
             self.model.eval()
-            for labels, inputs in self.val_loader:
+            for labels, _, _, inputs in self.val_loader:
+                if not val_loss:
+                    print(inputs)
                 with torch.no_grad():
+                    labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
                     outputs = self.model(inputs)
                     loss = F.binary_cross_entropy_with_logits(
                         outputs, labels.unsqueeze(-1).float(), reduction="mean"
@@ -97,28 +103,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--n_individuals",
+        "--n_agents",
         type=int,
         default=1000,
         help="Number of individuals/datapoints per generation.",
     )
     parser.add_argument(
-        "--n_simulations",
-        type=int,
-        default=1000,
-        help="Number of simulations per epoch.",
+        "--n_sims", type=int, default=1000, help="Number of simulations per epoch.",
     )
     parser.add_argument(
-        "--start",
-        type=float,
-        default=0.5,
-        help="Relative start frequency of trait."
+        "--start", type=float, default=0.5, help="Relative start frequency of trait."
     )
     parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=50,
-        help="Number of simulations per batch."
+        "--batch_size", type=int, default=50, help="Number of simulations per batch."
     )
     parser.add_argument(
         "--val_size",
@@ -127,10 +124,7 @@ if __name__ == "__main__":
         help="Fraction of simulations to use for validation.",
     )
     parser.add_argument(
-        "--n_bins",
-        type=int,
-        default=25,
-        help="Number of binning solutions."
+        "--n_bins", type=int, default=1, help="Number of binning solutions."
     )
     parser.add_argument(
         "--timesteps",
@@ -142,71 +136,59 @@ if __name__ == "__main__":
         "--n_epochs",
         type=int,
         default=10,
-        help="Number of epochs to train the Neural Networks."
+        help="Number of epochs to train the Neural Networks.",
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
         default=0.01,
-        help="Learning rate forthe Adam optimizer."
+        help="Learning rate forthe Adam optimizer.",
     )
+    parser.add_argument("--cuda", action="store_true", help="Use Cuda.")
     parser.add_argument(
         "--patience",
         type=int,
         default=10,
-        help="Number of allowed epochs without improvement."
+        help="Number of allowed epochs without improvement.",
     )
     parser.add_argument(
-        "--n_workers",
-        type=int,
-        default=1,
-        help="Number of data loader workers."
+        "--n_workers", type=int, default=1, help="Number of data loader workers."
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Random seed number."
-    )
+    parser.add_argument("--seed", type=int, default=None, help="Random seed number.")
 
     args = parser.parse_args()
 
+    if args.seed is None:
+        args.seed = 101
+
     train_data = SimulationData(
         start=args.start,
-        nbins=args.n_bins,
-        n_simulations=args.n_simulations,
-        n_individuals=args.n_individuals,
+        n_bins=args.n_bins,
+        n_sims=args.n_sims,
+        n_agents=args.n_agents,
         timesteps=args.timesteps,
         seed=args.seed,
     )
 
-    train_loader = DataLoader(
-        train_data,
-        batch_size=args.batch_size,
-        collate_fn=collate,
-        worker_init_fn=worker_init_fn
-        num_workers=args.n_workers
-        drop_last=True
-    )
+    train_loader = DataLoader(train_data, batch_size=args.batch_size,)
 
     val_data = SimulationData(
         start=args.start,
-        nbins=args.n_bins,
-        n_simulations=int(args.val_size * args.n_simulations),
-        n_individuals=args.n_individuals,
+        n_bins=args.n_bins,
+        n_sims=int(args.val_size * args.n_sims),
+        n_agents=args.n_agents,
         timesteps=args.timesteps,
-        seed=args.seed,
+        seed=args.seed + 1,
+        train=False,
     )
 
-    val_loader = DataLoader(
-        val_data,
-        batch_size=args.batch_size,
-        collate_fn=collate,
-        worker_init_fn=worker_init_fn
-        num_workers=args.n_workers
-        drop_last=True
-    )
+    val_loader = DataLoader(val_data, batch_size=args.batch_size,)
 
-    model = FCN(args.timesteps)
-    trainer = Trainer(model, train_loader, val_loader)
+    if args.cuda and torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    model = FCN(in_channels=1, num_classes=1).to(device)
+    trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)

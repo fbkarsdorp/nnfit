@@ -1,133 +1,110 @@
+import itertools
+
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import torch.utils.data
+import torch.nn.functional as F
+
+from typing import Tuple
 
 from simulation import EvoModel
 from utils import Prior
 
 
-def distort(trait_fd, r=0.5, r_sd=0):
-    traits = np.arange(trait_fd.shape[0])
-    new_trait_fd = np.zeros_like(trait_fd)
-    for i, fd in enumerate(trait_fd):
-        N = int(np.random.normal(loc=r, scale=r_sd) * fd.sum())
-        population = np.random.choice(traits, size=N, replace=True, p=fd / fd.sum())
-        for trait in population:
-            new_trait_fd[i, trait] += 1
-    return new_trait_fd
-
-
-def worker_init_fn(_):
-    worker_info = torch.utils.data.get_worker_info()
-    dataset = worker_info.dataset
-    worker_id = worker_info.id
-    split_size = len(dataset.data) // worker_info.num_workers
-    dataset.data = dataset.data[worker_id * split_size : (worker_id + 1) * split_size]
-
-
-def collate(data):
-    labels, selection, bins, outputs = zip(*data)
-    lengths = torch.LongTensor([output.size(1) for output in outputs])
-    length = lengths.max().item()
-    padded_outputs = []
-    for i, output in enumerate(outputs):
-        padded_outputs.append(
-            F.pad(output, (0, length - output.size(1)), "constant", 0)
-        )
-    return torch.tensor(inputs), selection, bins, torch.stack(padded_outputs)
-
-
-class SimulationData(torch.utils.data.IterableDataset):
+class SimulationData:
     def __init__(
         self,
-        selection_prior=None,
-        start=0.5,
-        nbins=25,
-        n_simulations=1000,
-        n_individuals=1000,
-        timesteps=200,
-        seed=None,
-    ):
+        selection_prior: Tuple[float, float] = None,
+        start: float = 0.5,
+        n_bins: int = 1,
+        n_sims: int = 1000,
+        n_agents: int = 1000,
+        timesteps: int = 200,
+        seed: int = None,
+        train: bool = True,
+    ) -> None:
+
+        self.rnd = np.random.RandomState(seed)
         if selection_prior is None:
             selection_prior = stats.beta(1, 5)
+            selection_prior.random_state = self.rnd
         self.selection_prior = selection_prior
-        self.data = np.arange(n_simulations)
-        self.start = int(start * n_individuals)
-        self.n_individuals = n_individuals
+        self.data = np.arange(n_sims)
+        self.start = int(start * n_agents)
+        self.n_agents = n_agents
         self.timesteps = timesteps
-        self.rnd = np.random.RandomState(seed)
-        self.bins = np.array([x[0] for x in np.array_split(np.arange(4, self.timesteps), nbins)])
+        self.train = train
+        self.seed = seed
+
+        self.bins = np.array(
+            [x[0] for x in np.array_split(np.arange(4, self.timesteps), n_bins)]
+        )
         self.bins[-1] = timesteps
+
+        self.set_priors()
+
+    def set_priors(self):
+        # Preset random values for reuse in validation
+        n = len(self.data)
+        self.selection_priors = self.selection_prior.rvs(n)
+        self.bias_priors = self.rnd.rand(n)
+        self.binnings = self.rnd.choice(self.bins, size=n)
 
     def __iter__(self):
         self.n_samples = 0
+        if not self.train:
+            self.rnd = np.random.RandomState(self.seed)
+        if self.train:
+           self.set_priors()
         return self
 
     def __next__(self):
         if self.n_samples < len(self.data):
-            self.n_samples += 1
-            s = self.selection_prior.rvs()
-            if self.rnd.rand() < 0.5:
+            s = self.selection_priors[self.n_samples]
+            if self.bias_priors[self.n_samples] < 0.5:
                 s = 0
             j = np.zeros(self.timesteps)
             j[0] = self.start
             for i in range(1, self.timesteps):
-                p_star = j[i - 1] * (1 + s) / (j[i - 1] * s + self.n_individuals)
-                j[i] = self.rnd.binomial(self.n_individuals, min(p_star, 1))
+                p_star = j[i - 1] * (1 + s) / (j[i - 1] * s + self.n_agents)
+                j[i] = self.rnd.binomial(self.n_agents, min(p_star, 1))
             biased = int(s != 0)
-            n_bins = self.rnd.choice(self.bins)
+            n_bins = self.binnings[self.n_samples]
             binning = np.array_split(np.arange(self.timesteps), n_bins)
-            j = np.array([j[ii].sum() for ii in binning])
-            return biases, s, n_bins, data
+            j = np.array([j[ii].sum() / (len(ii) * self.n_agents) for ii in binning])
+            self.n_samples += 1
+            return biased, s, n_bins, torch.FloatTensor(j)
         raise StopIteration
 
 
-class WrightFisherData(torch.utils.data.IterableDataset):
-    def __init__(
-        self,
-        n_simulations=1000,
-        n_individuals=1000,
-        timesteps=10,
-        burn_in=1000,
-        prior=None,
-        r=0.5,
-        r_sd=0,
-        seed=None,
-        n_workers=1,
-        verbose=False,
-    ):
-        self.n_individuals = n_individuals
-        self.data = np.arange(n_simulations)
-        self.timesteps = timesteps
-        self.burn_in = burn_in
-        self.r = r
-        self.r_sd = r_sd
-        self.seed = seed
-        self.verbose = verbose
-        self.n_workers = n_workers
-        if prior is None:
-            prior = Prior(b=stats.uniform(-0.5, 1), mu=stats.uniform(0.0001, 0.1))
-        self.prior = prior
+class DataLoader:
+    def __init__(self, dataset: SimulationData, batch_size: int = 1) -> None:
+        self.dataset = dataset
+        self.batch_size = batch_size
 
     def __iter__(self):
-        self.n_samples = 0
-        return self
+        batches, size = 0, 0
+        dataset = iter(self.dataset)
+        samples = []
+        for sample in dataset:
+            samples.append(sample)
+            if len(samples) == self.batch_size:
+                yield self.collate(samples, dataset.timesteps)
+                samples = []
+        if samples:
+            yield self.collate(samples, dataset.timesteps)
 
-    def __next__(self):
-        if self.n_samples < len(self.data):
-            self.n_samples += 1
-            params = self.prior.rvs()
-            if self.rnd.rand() < 0.5:
-                params["b"] = 0
-            model = EvoModel(
-                self.n_individuals,
-                mu=params["mu"],
-                b=params["b"],
-                burn_in=self.burn_in,
-                timesteps=self.timsteps,
-                seed=self.seed,
-            ).run()
-            biased = int(params["b"] != 0)
-            return biased, distort(model.trait_fd, r=self.r, r_sd=self.r_sd)
-        raise StopIteration
+    def collate(self, data, length):
+        labels, selection, bins, outputs = zip(*data)
+        padded_outputs = []
+        for i, output in enumerate(outputs):
+            padded_outputs.append(
+                F.pad(output, (0, length - output.size(0)), "constant", 0)
+            )
+        return (
+            torch.LongTensor(labels),
+            torch.FloatTensor(selection),
+            torch.LongTensor(bins),
+            torch.stack(padded_outputs),
+        )
