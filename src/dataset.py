@@ -78,6 +78,29 @@ class SimulationData:
         raise StopIteration
 
 
+class TestSimulationData(SimulationData):
+    def __init__(self, start=0.5, n_sims=1000, n_bins=25, n_agents=1000, timesteps=200):
+        super().__init__(
+            start=start, n_sims=n_sims, n_agents=n_agents, n_bins=n_bins, timesteps=timesteps, train=False)
+
+        self.selection_priors = []
+        self.binnings = []
+        self.bias_priors = []
+
+        for bias in (0, 1):
+            for binning in self.bins:
+                for selection in np.linspace(0, 1, n_sims):
+                    self.selection_priors.append(selection)
+                    self.binnings.append(binning)
+                    self.bias_priors.append(bias)
+
+        self.selection_priors = np.array(self.selection_priors)
+        self.binnings = np.array(self.binnings)
+        self.bias_priors = np.array(self.bias_priors)
+
+        self.data = np.arange(len(self.binnings))
+        
+
 class DataLoader:
     def __init__(self, dataset: SimulationData, batch_size: int = 1) -> None:
         self.dataset = dataset

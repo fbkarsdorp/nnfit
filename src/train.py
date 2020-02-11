@@ -9,8 +9,8 @@ import torch.nn.functional as F
 
 from sklearn.metrics import accuracy_score
 
-from nets import FCN
-from dataset import SimulationData, DataLoader
+from nets import FCN, InceptionModel
+from dataset import SimulationData, TestSimulationData, DataLoader
 
 
 class Trainer:
@@ -36,8 +36,6 @@ class Trainer:
 
             train_loss = []
             for labels, _, _, inputs in self.train_loader:
-                if not train_loss:
-                    print(inputs)
                 labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
                 optimizer.zero_grad()
                 outputs = self.model(inputs)
@@ -52,8 +50,6 @@ class Trainer:
             val_loss, y_true, y_pred = [], [], []
             self.model.eval()
             for labels, _, _, inputs in self.val_loader:
-                if not val_loss:
-                    print(inputs)
                 with torch.no_grad():
                     labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
                     outputs = self.model(inputs)
@@ -61,9 +57,9 @@ class Trainer:
                         outputs, labels.unsqueeze(-1).float(), reduction="mean"
                     )
                     val_loss.append(loss.item())
-                    preds = (torch.sigmoid(outputs).numpy() > 0.5).tolist()
+                    preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5).tolist()
                     y_pred.extend(preds)
-                    y_true.extend(labels.numpy().tolist())
+                    y_true.extend(labels.cpu().numpy().tolist())
 
             self.val_scores.append(accuracy_score(y_true, y_pred))
             self.val_loss.append(np.mean(val_loss))
@@ -97,6 +93,20 @@ class Trainer:
         }
         torch.save(save_dict, savepath)
         return savepath
+
+    def evaluate(self, test_loader):
+        self.model.eval()
+        results = {"y_true": [], "y_pred": [], "selection": [], 'bins': []}
+        for labels, selection, bins, inputs in test_loader:
+            with torch.no_grad():
+                labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
+                outputs = self.model(inputs)
+                preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5).tolist()
+                results['y_pred'].extend(preds)
+                results['y_true'].extend(labels.cpu().numpy().tolist())
+                results['selection'].extend(selection.numpy().tolist())
+                results['bins'].extend(bins.numpy().tolist())
+        return results        
 
 
 if __name__ == "__main__":
@@ -154,6 +164,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_workers", type=int, default=1, help="Number of data loader workers."
     )
+    parser.add_argument(
+        "--model",
+        choices=["FCN", "Inception"],
+        default="FNC"
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Apply models to linspace test set."
+    )
     parser.add_argument("--seed", type=int, default=None, help="Random seed number.")
 
     args = parser.parse_args()
@@ -186,9 +206,27 @@ if __name__ == "__main__":
 
     if args.cuda and torch.cuda.is_available():
         device = torch.device("cuda")
+        print("Using GPU")
     else:
         device = torch.device("cpu")
 
-    model = FCN(in_channels=1, num_classes=1).to(device)
+    if args.model == "Inception":
+        model = InceptionModel(num_blocks=1, in_channels=1, out_channels=2,
+                               bottleneck_channels=2, kernel_sizes=41, use_residuals=True,
+                               num_pred_classes=1).to(device)
+    else:
+        model = FCN(1, 1).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
+    
+    if args.test:
+        test_data = TestSimulationData(
+            start=args.start,
+            n_sims=args.n_sims,
+            n_agents=args.n_agents,
+            timesteps=args.timesteps
+        )
+
+        test_loader = DataLoader(test_data, batch_size=args.batch_size)
+        results = trainer.evaluate(test_loader)
+        
