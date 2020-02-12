@@ -12,6 +12,27 @@ from simulation import EvoModel
 from utils import Prior
 
 
+def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
+    rnd = np.random.RandomState(seed)
+    series = np.zeros(T)
+    series[0] = int(start * N)
+    for i in range(1, T):
+        p_star = (
+            series[i - 1]
+            * (1 + selection_strength)
+            / (series[i - 1] * selection_strength + N)
+        )
+        series[i] = rnd.binomial(N, min(p_star, 1))
+    return series
+
+
+def distort_distribution(distribution, throw_out_p=0.01, missing_values_p=0.1):
+    # throw_out = np.random.rand(distribution.shape[0]) < throw_out_p
+    # distribution = distribution[~throw_out]
+    missing_values = np.random.binomial(distribution.astype(int), p=missing_values_p)
+    return distribution - missing_values
+
+
 class SimulationData:
     def __init__(
         self,
@@ -23,6 +44,7 @@ class SimulationData:
         timesteps: int = 200,
         seed: int = None,
         train: bool = True,
+        distort: bool = False,
     ) -> None:
 
         self.rnd = np.random.RandomState(seed)
@@ -36,6 +58,7 @@ class SimulationData:
         self.timesteps = timesteps
         self.train = train
         self.seed = seed
+        self.distort = distort
 
         self.bins = np.array(
             [x[0] for x in np.array_split(np.arange(4, self.timesteps), n_bins)]
@@ -56,7 +79,7 @@ class SimulationData:
         if not self.train:
             self.rnd = np.random.RandomState(self.seed)
         if self.train:
-           self.set_priors()
+            self.set_priors()
         return self
 
     def __next__(self):
@@ -72,6 +95,8 @@ class SimulationData:
             biased = int(s != 0)
             n_bins = self.binnings[self.n_samples]
             binning = np.array_split(np.arange(self.timesteps), n_bins)
+            if self.distort:
+                j = distort_distribution(j)
             j = np.array([j[ii].sum() / (len(ii) * self.n_agents) for ii in binning])
             self.n_samples += 1
             return biased, s, n_bins, torch.FloatTensor(j)
@@ -81,7 +106,13 @@ class SimulationData:
 class TestSimulationData(SimulationData):
     def __init__(self, start=0.5, n_sims=1000, n_bins=25, n_agents=1000, timesteps=200):
         super().__init__(
-            start=start, n_sims=n_sims, n_agents=n_agents, n_bins=n_bins, timesteps=timesteps, train=False)
+            start=start,
+            n_sims=n_sims,
+            n_agents=n_agents,
+            n_bins=n_bins,
+            timesteps=timesteps,
+            train=False,
+        )
 
         self.selection_priors = []
         self.binnings = []
@@ -99,7 +130,7 @@ class TestSimulationData(SimulationData):
         self.bias_priors = np.array(self.bias_priors)
 
         self.data = np.arange(len(self.binnings))
-        
+
 
 class DataLoader:
     def __init__(self, dataset: SimulationData, batch_size: int = 1) -> None:
