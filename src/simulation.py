@@ -41,3 +41,16 @@ class EvoModel:
             self.n_traits, self.n_traits + n_innovations)
         self.n_traits += n_innovations
         
+
+def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
+    rnd = np.random.RandomState(seed)
+    series = np.zeros(T)
+    series[0] = int(start * N)
+    for i in range(1, T):
+        p_star = (
+            series[i - 1]
+            * (1 + selection_strength)
+            / (series[i - 1] * selection_strength + N)
+        )
+        series[i] = rnd.binomial(N, min(p_star, 1))
+    return series
