@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,12 @@ from sklearn.metrics import accuracy_score
 
 from nets import FCN, InceptionModel
 from dataset import SimulationData, TestSimulationData, DataLoader
+
+
+def make_seed():
+    now = datetime.now()
+    seed = now.hour * 10000 + now.minute * 100 + now.second
+    return seed
 
 
 class Trainer:
@@ -96,16 +103,18 @@ class Trainer:
 
     def evaluate(self, test_loader):
         self.model.eval()
-        results = {"y_true": [], "y_pred": [], "selection": [], 'bins': []}
+        results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], 'bins': []}
         for labels, selection, bins, inputs in test_loader:
             with torch.no_grad():
                 labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
                 outputs = self.model(inputs)
-                preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5).tolist()
+                probs = torch.sigmoid(outputs).cpu().numpy()
+                preds = (probs > 0.5).tolist()
                 results['y_pred'].extend(preds)
                 results['y_true'].extend(labels.cpu().numpy().tolist())
                 results['selection'].extend(selection.numpy().tolist())
                 results['bins'].extend(bins.numpy().tolist())
+                results['probs'].extend(probs.tolist())
         return results        
 
 
@@ -179,7 +188,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.seed is None:
-        args.seed = 101
+        args.seed = make_seed()
 
     train_data = SimulationData(
         start=args.start,
