@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from sklearn.metrics import accuracy_score
 
-from nets import FCN, InceptionModel
+from nets import FCN
 from dataset import SimulationData, TestSimulationData, DataLoader
 
 
@@ -43,11 +43,14 @@ class Trainer:
 
             train_loss = []
             for labels, _, _, inputs in self.train_loader:
-                labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
+                labels, inputs = (
+                    labels.to(self.device),
+                    inputs.to(self.device).unsqueeze(1),
+                )
                 optimizer.zero_grad()
                 outputs = self.model(inputs)
                 loss = F.binary_cross_entropy_with_logits(
-                    outputs, labels.unsqueeze(-1).float(), reduction="mean"
+                    outputs, labels.unsqueeze(-1).float()
                 )
                 train_loss.append(loss.item())
                 loss.backward()
@@ -58,10 +61,13 @@ class Trainer:
             self.model.eval()
             for labels, _, _, inputs in self.val_loader:
                 with torch.no_grad():
-                    labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
+                    labels, inputs = (
+                        labels.to(self.device),
+                        inputs.to(self.device).unsqueeze(1),
+                    )
                     outputs = self.model(inputs)
                     loss = F.binary_cross_entropy_with_logits(
-                        outputs, labels.unsqueeze(-1).float(), reduction="mean"
+                        outputs, labels.unsqueeze(-1).float()
                     )
                     val_loss.append(loss.item())
                     preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5).tolist()
@@ -103,19 +109,22 @@ class Trainer:
 
     def evaluate(self, test_loader):
         self.model.eval()
-        results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], 'bins': []}
+        results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], "bins": []}
         for labels, selection, bins, inputs in test_loader:
             with torch.no_grad():
-                labels, inputs = labels.to(self.device), inputs.to(self.device).unsqueeze(1)
+                labels, inputs = (
+                    labels.to(self.device),
+                    inputs.to(self.device).unsqueeze(1),
+                )
                 outputs = self.model(inputs)
                 probs = torch.sigmoid(outputs).cpu().numpy()
                 preds = (probs > 0.5).tolist()
-                results['y_pred'].extend(preds)
-                results['y_true'].extend(labels.cpu().numpy().tolist())
-                results['selection'].extend(selection.numpy().tolist())
-                results['bins'].extend(bins.numpy().tolist())
-                results['probs'].extend(probs.tolist())
-        return results        
+                results["y_pred"].extend(preds)
+                results["y_true"].extend(labels.cpu().numpy().tolist())
+                results["selection"].extend(selection.numpy().tolist())
+                results["bins"].extend(bins.numpy().tolist())
+                results["probs"].extend(probs.tolist())
+        return results
 
 
 if __name__ == "__main__":
@@ -174,14 +183,7 @@ if __name__ == "__main__":
         "--n_workers", type=int, default=1, help="Number of data loader workers."
     )
     parser.add_argument(
-        "--model",
-        choices=["FCN", "Inception"],
-        default="FNC"
-    )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Apply models to linspace test set."
+        "--test", action="store_true", help="Apply models to linspace test set."
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed number.")
 
@@ -219,23 +221,17 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    if args.model == "Inception":
-        model = InceptionModel(num_blocks=1, in_channels=1, out_channels=2,
-                               bottleneck_channels=2, kernel_sizes=41, use_residuals=True,
-                               num_pred_classes=1).to(device)
-    else:
-        model = FCN(1, 1).to(device)
+    model = FCN(1, 1).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
-    
+
     if args.test:
         test_data = TestSimulationData(
             start=args.start,
             n_sims=args.n_sims,
             n_agents=args.n_agents,
-            timesteps=args.timesteps
+            timesteps=args.timesteps,
         )
 
         test_loader = DataLoader(test_data, batch_size=args.batch_size)
         results = trainer.evaluate(test_loader)
-        
