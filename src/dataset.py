@@ -28,7 +28,6 @@ def apply_binning(counts, n_bins, n_agents, rnd=None, variable=False, distortion
 
     return output
 
-
 class SimulationData:
     def __init__(
         self,
