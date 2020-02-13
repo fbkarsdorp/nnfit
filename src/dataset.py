@@ -1,32 +1,13 @@
-import itertools
 
 import numpy as np
-import pandas as pd
 import scipy.stats as stats
 import torch.utils.data
 import torch.nn.functional as F
 
 from typing import Tuple
 
-from simulation import EvoModel
-from utils import Prior
 
-
-def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
-    rnd = np.random.RandomState(seed)
-    series = np.zeros(T)
-    series[0] = int(start * N)
-    for i in range(1, T):
-        p_star = (
-            series[i - 1]
-            * (1 + selection_strength)
-            / (series[i - 1] * selection_strength + N)
-        )
-        series[i] = rnd.binomial(N, min(p_star, 1))
-    return series
-
-
-def binning(counts, n_bins, n_agents, rnd=None, variable=False, distortions=None):
+def apply_binning(counts, n_bins, n_agents, rnd=None, variable=False, distortions=None):
     # produce relative frequency per bin
     if distortions is None:
         distortions = np.zeros_like(counts)
@@ -114,22 +95,30 @@ class SimulationData:
             s = self.selection_priors[self.n_samples]
             if self.bias_priors[self.n_samples] < 0.5:
                 s = 0
+
             j = np.zeros(self.timesteps)
             j[0] = self.start
             for i in range(1, self.timesteps):
                 p_star = j[i - 1] * (1 + s) / (j[i - 1] * s + self.n_agents)
                 j[i] = self.rnd.binomial(self.n_agents, min(p_star, 1))
-            biased = int(s != 0)
-            n_bins = self.binnings[self.n_samples]
+
+            # apply distortions
             distortions = None
             if self.distortion_prior:
                 ps = self.distortion_priors[len(j)]
                 distortions = self.rnd.binomial(j.astype(int), ps)
                 j -= distortions
-            j = binning(j, n_bins, self.n_agents, rnd=self.rnd,
-                        variable=self.variable, distortions=distortions)
+
+            # binning
+            n_bins = self.binnings[self.n_samples]
+            j = apply_binning(j, n_bins, self.n_agents, rnd=self.rnd,
+                              variable=self.variable, distortions=distortions)
             self.n_samples += 1
+
+            biased = int(s != 0)
+
             return biased, s, n_bins, torch.FloatTensor(j)
+
         raise StopIteration
 
 
