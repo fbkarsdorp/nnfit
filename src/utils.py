@@ -19,3 +19,16 @@ def counters2array(counters):
     return array
 
 
+class Distorter:
+    def __init__(self, loss_a=0.5, loss_b=1.5, seed=None):
+        self.loss_prior = stats.beta(loss_a, loss_b)
+        self.rnd = np.random.RandomState(seed)
+
+    def distort(self, values, time=None):
+        if time is None:
+            time = np.arange(1, values.shape[0] + 1)
+
+        loss_prior = np.clip(self.loss_prior.rvs(values.shape[0]), 0, 1)
+        values = values - self.rnd.binomial(values.astype(int), loss_prior)
+
+        return values[values > 0], time[values > 0]
