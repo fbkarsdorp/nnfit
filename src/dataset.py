@@ -24,14 +24,7 @@ def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
         )
         series[i] = rnd.binomial(N, min(p_star, 1))
     return series
-
-
-def distort_distribution(distribution, throw_out_p=0.01, missing_values_p=0.1):
-    # throw_out = np.random.rand(distribution.shape[0]) < throw_out_p
-    # distribution = distribution[~throw_out]
-    missing_values = np.random.binomial(distribution.astype(int), p=missing_values_p)
-    return distribution - missing_values
-
+        
 
 class SimulationData:
     def __init__(
