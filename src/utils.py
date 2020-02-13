@@ -26,11 +26,6 @@ class Distorter:
         self.prior = prior
         self.rnd = np.random.RandomState(seed)
 
-    def distort(self, values, time=None):
-        if time is None:
-            time = np.arange(1, values.shape[0] + 1)
-
+    def distort(self, values):
         loss_prior = self.prior.rvs(values.shape[0])
-        values = values - self.rnd.binomial(values.astype(int), loss_prior)
-
-        return values[values > 0], time[values > 0]
+        return self.rnd.binomial(values.astype(int), loss_prior)
