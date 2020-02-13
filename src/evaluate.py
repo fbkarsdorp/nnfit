@@ -17,13 +17,15 @@ def simulate(args):
     # if bin_size is not None:
     #     data, time = apply_binning(data, bin_size)
 
-    t, p = frequency_increment_test(time, data)
+    fit = frequency_increment_test(time, data)
     return {
         "bin_size": bin_size,
         "selection_strength": ss,
-        "t_statistic": t,
-        "p_value": p,
-        "selection": int(p < 0.05),
+        "t_statistic": fit["T"],
+        "t_test_p_value": fit["Tp"],
+        "shapiro_statistic": fit["W"],
+        "shapiro_p_value": fit["Wp"],
+        "selection": int(fit["Tp"] < 0.05),
     }
 
 if __name__ == "__main__":
