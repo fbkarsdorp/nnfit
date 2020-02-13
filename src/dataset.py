@@ -53,6 +53,7 @@ class SimulationData:
         self,
         selection_prior: Tuple[float, float] = (1, 5),
         distortion_prior: Tuple[float, float] = None,
+        variable_binning=False,
         start: float = 0.5,
         n_bins: int = 1,
         n_sims: int = 1000,
@@ -70,6 +71,9 @@ class SimulationData:
         if self.distortion_prior is not None:
             self.distortion_prior = stats.beta(distortion_prior[0], distortion_prior[1])
             self.distortion_prior.random_state = self.rnd
+        if variable_binning and not self.distortion_prior:
+            raise ValueError("Variable binning requires distortion prior")
+        self.variable = variable_binning
         self.data = np.arange(n_sims)
         self.start = int(start * n_agents)
         self.n_agents = n_agents
@@ -123,7 +127,7 @@ class SimulationData:
                 distortions = self.rnd.binomial(j.astype(int), ps)
                 j -= distortions
             j = binning(j, n_bins, self.n_agents, rnd=self.rnd,
-                        variable=True, distortions=distortions)
+                        variable=self.variable, distortions=distortions)
             self.n_samples += 1
             return biased, s, n_bins, torch.FloatTensor(j)
         raise StopIteration
@@ -187,6 +191,3 @@ class DataLoader:
             torch.LongTensor(bins),
             torch.stack(padded_outputs),
         )
-
-
-data = iter(SimulationData(n_bins=5, distortion_prior=(1, 5)))
