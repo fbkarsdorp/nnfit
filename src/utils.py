@@ -28,7 +28,7 @@ class Distorter:
         if time is None:
             time = np.arange(1, values.shape[0] + 1)
 
-        loss_prior = np.clip(self.loss_prior.rvs(values.shape[0]), 0, 1)
+        loss_prior = self.loss_prior.rvs(values.shape[0])
         values = values - self.rnd.binomial(values.astype(int), loss_prior)
 
         return values[values > 0], time[values > 0]
