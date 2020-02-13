@@ -24,12 +24,35 @@ def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
         )
         series[i] = rnd.binomial(N, min(p_star, 1))
     return series
-        
+
+
+def binning(counts, n_bins, n_agents, rnd=None, variable=False, distortions=None):
+    # produce relative frequency per bin
+    if distortions is None:
+        distortions = np.zeros_like(counts)
+    pop_size = n_agents - distortions
+
+    if not variable:
+        bins = np.array_split(np.arange(len(counts)), n_bins)
+        return [counts[b].sum() / pop_size[b].sum() for b in bins]
+
+    # assume variable
+    output = np.zeros(sum(pop_size))
+    cur = 0
+    for count, c_pop_size in zip(counts.astype(int).tolist(), pop_size.tolist()):
+        output[cur: cur+c_pop_size] = (rnd or np.random).permutation(
+            [1] * count + [0] * (c_pop_size - count))
+        cur += c_pop_size
+    output = np.array([sum(b) / len(b) for b in np.array_split(output, n_bins)])
+
+    return output
+
 
 class SimulationData:
     def __init__(
         self,
-        selection_prior: Tuple[float, float] = None,
+        selection_prior: Tuple[float, float] = (1, 5),
+        distortion_prior: Tuple[float, float] = None,
         start: float = 0.5,
         n_bins: int = 1,
         n_sims: int = 1000,
@@ -37,26 +60,30 @@ class SimulationData:
         timesteps: int = 200,
         seed: int = None,
         train: bool = True,
-        distort: bool = False,
+        min_bin_length: int = 4
     ) -> None:
 
         self.rnd = np.random.RandomState(seed)
-        if selection_prior is None:
-            selection_prior = stats.beta(1, 5)
-            selection_prior.random_state = self.rnd
-        self.selection_prior = selection_prior
+        self.selection_prior = stats.beta(selection_prior[0], selection_prior[1])
+        self.selection_prior.random_state = self.rnd
+        self.distortion_prior = distortion_prior
+        if self.distortion_prior is not None:
+            self.distortion_prior = stats.beta(distortion_prior[0], distortion_prior[1])
+            self.distortion_prior.random_state = self.rnd
         self.data = np.arange(n_sims)
         self.start = int(start * n_agents)
         self.n_agents = n_agents
         self.timesteps = timesteps
         self.train = train
         self.seed = seed
-        self.distort = distort
 
-        self.bins = np.array(
-            [x[0] for x in np.array_split(np.arange(4, self.timesteps), n_bins)]
-        )
-        self.bins[-1] = timesteps
+        # sample bins following Karjus
+        bins = {}
+        maxlen = np.ceil(timesteps / min_bin_length)
+        for i in range(1, int(maxlen + 1)):
+            bins[i] = int(np.ceil(timesteps / i))
+        bins = sorted(set(bins.values()))
+        self.bins = np.array(bins)
 
         self.set_priors()
 
@@ -64,6 +91,9 @@ class SimulationData:
         # Preset random values for reuse in validation
         n = len(self.data)
         self.selection_priors = self.selection_prior.rvs(n)
+        self.distortion_priors = None
+        if self.distortion_prior is not None:
+            self.distortion_priors = self.distortion_prior.rvs(n)
         self.bias_priors = self.rnd.rand(n)
         self.binnings = self.rnd.choice(self.bins, size=n)
 
@@ -87,10 +117,13 @@ class SimulationData:
                 j[i] = self.rnd.binomial(self.n_agents, min(p_star, 1))
             biased = int(s != 0)
             n_bins = self.binnings[self.n_samples]
-            binning = np.array_split(np.arange(self.timesteps), n_bins)
-            if self.distort:
-                j = distort_distribution(j)
-            j = np.array([j[ii].sum() / (len(ii) * self.n_agents) for ii in binning])
+            distortions = None
+            if self.distortion_prior:
+                ps = self.distortion_priors[len(j)]
+                distortions = self.rnd.binomial(j.astype(int), ps)
+                j -= distortions
+            j = binning(j, n_bins, self.n_agents, rnd=self.rnd,
+                        variable=True, distortions=distortions)
             self.n_samples += 1
             return biased, s, n_bins, torch.FloatTensor(j)
         raise StopIteration
@@ -131,7 +164,6 @@ class DataLoader:
         self.batch_size = batch_size
 
     def __iter__(self):
-        batches, size = 0, 0
         dataset = iter(self.dataset)
         samples = []
         for sample in dataset:
@@ -155,3 +187,6 @@ class DataLoader:
             torch.LongTensor(bins),
             torch.stack(padded_outputs),
         )
+
+
+data = iter(SimulationData(n_bins=5, distortion_prior=(1, 5)))
