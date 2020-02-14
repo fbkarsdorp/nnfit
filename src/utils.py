@@ -16,8 +16,7 @@ def check_random_state(seed):
         return np.random.RandomState(seed)
     if isinstance(seed, np.random.RandomState):
         return seed
-    raise ValueError('%r cannot be used to seed a numpy.random.RandomState'
-                     ' instance' % seed)
+    raise ValueError("%r cannot be used to seed a numpy.random.RandomState" " instance" % seed)
 
 
 class Prior:
@@ -46,14 +45,18 @@ def apply_binning(counts, n_bins, n_agents, variable=False, distortions=None, ra
 
     if not variable:
         bins = np.array_split(np.arange(len(counts)), n_bins)
-        return [counts[b].sum() / pop_size[b].sum() for b in bins]
+        return [
+            (counts[b].sum() / pop_size[b].sum()) if pop_size[b].sum() > 0 else 0
+            for b in bins
+        ]
 
     # assume variable
     output = np.zeros(sum(pop_size))
     cur = 0
     for count, c_pop_size in zip(counts.astype(int).tolist(), pop_size.tolist()):
-        output[cur: cur+c_pop_size] = rng.permutation(
-            [1] * count + [0] * (c_pop_size - count))
+        output[cur : cur + c_pop_size] = rng.permutation(
+            [1] * count + [0] * (c_pop_size - count)
+        )
         cur += c_pop_size
     output = np.array([sum(b) / len(b) for b in np.array_split(output, n_bins)])
 
@@ -80,7 +83,7 @@ class Distorter:
 
 
 class suppress_stdout_stderr(object):
-    '''
+    """
     A context manager for doing a "deep suppression" of stdout and stderr in
     Python, i.e. will suppress all print, even if the print originates in a
     compiled C/Fortran sub-function.
@@ -88,7 +91,8 @@ class suppress_stdout_stderr(object):
     to stderr just before a script exits, and after the context manager has
     exited (at least, I think that is why it lets exceptions through).
 
-    '''
+    """
+
     def __init__(self):
         # Open a pair of null files
         self.null_fds = [os.open(os.devnull, os.O_RDWR) for x in range(2)]
@@ -125,4 +129,3 @@ def StanModel_cache(model_code, model_name=None, **kwargs):
     else:
         print("Using cached StanModel")
     return sm
-
