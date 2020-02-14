@@ -1,10 +1,23 @@
-from hashlib import md5
+import numbers
 import pickle
+
+from hashlib import md5
 
 import os
 import numpy as np
 import scipy.stats as stats
 import pystan
+
+
+def check_random_state(seed):
+    if seed is None or seed is np.random:
+        return np.random.mtrand._rand
+    if isinstance(seed, numbers.Integral):
+        return np.random.RandomState(seed)
+    if isinstance(seed, np.random.RandomState):
+        return seed
+    raise ValueError('%r cannot be used to seed a numpy.random.RandomState'
+                     ' instance' % seed)
 
 
 class Prior:
@@ -24,16 +37,46 @@ def counters2array(counters):
     return array
 
 
+def apply_binning(counts, n_bins, n_agents, variable=False, distortions=None, random_state=None):
+    rng = check_random_state(random_state)
+    # produce relative frequency per bin
+    if distortions is None:
+        distortions = np.zeros_like(counts)
+    pop_size = n_agents - distortions
+
+    if not variable:
+        bins = np.array_split(np.arange(len(counts)), n_bins)
+        return [counts[b].sum() / pop_size[b].sum() for b in bins]
+
+    # assume variable
+    output = np.zeros(sum(pop_size))
+    cur = 0
+    for count, c_pop_size in zip(counts.astype(int).tolist(), pop_size.tolist()):
+        output[cur: cur+c_pop_size] = rng.permutation(
+            [1] * count + [0] * (c_pop_size - count))
+        cur += c_pop_size
+    output = np.array([sum(b) / len(b) for b in np.array_split(output, n_bins)])
+
+    return output
+
+
 class Distorter:
-    def __init__(self, prior=None, seed=None):
-        if prior is None:
-            prior = stats.beta(0.5, 1.5)
-        self.prior = prior
-        self.rnd = np.random.RandomState(seed)
+    def __init__(self, prior=(0.5, 1.5), seed=None):
+        self.prior = stats.beta(prior[0], prior[1])
+        self.rng = check_random_state(seed)
+        self.seed = seed
+
+    def _sample(self, n):
+        return self.prior.rvs(n, random_state=self.rng)
 
     def distort(self, values):
-        loss_prior = self.prior.rvs(values.shape[0])
-        return self.rnd.binomial(values.astype(int), loss_prior)
+        loss_prior = self._sample(values.shape[0])
+        return self.rng.binomial(values.astype(int), loss_prior)
+
+    def reset(self):
+        alpha, beta = self.prior.args
+        self.prior = stats.beta(alpha, beta)
+        self.rng = check_random_state(self.seed)
 
 
 class suppress_stdout_stderr(object):

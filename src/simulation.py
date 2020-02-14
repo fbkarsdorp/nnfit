@@ -1,7 +1,9 @@
+import collections
+
 import numpy as np
 import tqdm
 
-from utils import counters2array
+from utils import counters2array, check_random_state
 
 
 class EvoModel:
@@ -11,7 +13,7 @@ class EvoModel:
         self.b = b
         self.burn_in = burn_in
         self.timesteps = timesteps
-        self.rnd = np.random.RandomState(seed)
+        self.rng = check_random_state(seed)
         self.verbose = verbose
         self.n_traits = N
 
@@ -32,18 +34,18 @@ class EvoModel:
         traits, counts = np.unique(self.population, return_counts=True)
         counts = (counts ** (1 - self.b))
         # Randomly assign new traits to population
-        self.population = self.rnd.choice(
+        self.population = self.rng.choice(
             traits, self.N, replace=True, p=counts / counts.sum())
         # Assign innovations to innovating individuals
-        innovating_population = self.rnd.rand(self.N) < self.mu
+        innovating_population = self.rng.rand(self.N) < self.mu
         n_innovations = innovating_population.sum()
         self.population[innovating_population] = np.arange(
             self.n_traits, self.n_traits + n_innovations)
         self.n_traits += n_innovations
         
 
-def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
-    rnd = np.random.RandomState(seed)
+def wright_fisher(N, T, selection_strength, start=0.5, random_state=None):
+    rng = check_random_state(random_state)
     series = np.zeros(T)
     series[0] = int(start * N)
     for i in range(1, T):
@@ -52,5 +54,5 @@ def wright_fisher(N, T, selection_strength, start=0.5, seed=None):
             * (1 + selection_strength)
             / (series[i - 1] * selection_strength + N)
         )
-        series[i] = rnd.binomial(N, min(p_star, 1))
+        series[i] = rng.binomial(N, min(p_star, 1))
     return series

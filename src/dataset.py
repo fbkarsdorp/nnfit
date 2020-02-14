@@ -5,34 +5,15 @@ import torch.utils.data
 import torch.nn.functional as F
 
 from typing import Tuple
+from utils import apply_binning, Distorter, check_random_state
+from simulation import wright_fisher
 
-
-def apply_binning(counts, n_bins, n_agents, rnd=None, variable=False, distortions=None):
-    # produce relative frequency per bin
-    if distortions is None:
-        distortions = np.zeros_like(counts)
-    pop_size = n_agents - distortions
-
-    if not variable:
-        bins = np.array_split(np.arange(len(counts)), n_bins)
-        return [counts[b].sum() / pop_size[b].sum() for b in bins]
-
-    # assume variable
-    output = np.zeros(sum(pop_size))
-    cur = 0
-    for count, c_pop_size in zip(counts.astype(int).tolist(), pop_size.tolist()):
-        output[cur: cur+c_pop_size] = (rnd or np.random).permutation(
-            [1] * count + [0] * (c_pop_size - count))
-        cur += c_pop_size
-    output = np.array([sum(b) / len(b) for b in np.array_split(output, n_bins)])
-
-    return output
 
 class SimulationData:
     def __init__(
         self,
         selection_prior: Tuple[float, float] = (1, 5),
-        distortion_prior: Tuple[float, float] = None,
+        distortion: Distorter = None,
         variable_binning=False,
         start: float = 0.5,
         n_bins: int = 1,
@@ -44,18 +25,15 @@ class SimulationData:
         min_bin_length: int = 4
     ) -> None:
 
-        self.rnd = np.random.RandomState(seed)
+        self.rng = check_random_state(seed)
         self.selection_prior = stats.beta(selection_prior[0], selection_prior[1])
-        self.selection_prior.random_state = self.rnd
-        self.distortion_prior = distortion_prior
-        if self.distortion_prior is not None:
-            self.distortion_prior = stats.beta(distortion_prior[0], distortion_prior[1])
-            self.distortion_prior.random_state = self.rnd
-        if variable_binning and not self.distortion_prior:
+        self.selection_prior.random_state = self.rng
+        self.distortion = distortion
+        if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
         self.variable = variable_binning
         self.data = np.arange(n_sims)
-        self.start = int(start * n_agents)
+        self.start = start
         self.n_agents = n_agents
         self.timesteps = timesteps
         self.train = train
@@ -71,20 +49,21 @@ class SimulationData:
 
         self.set_priors()
 
-    def set_priors(self):
+    def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self.data)
         self.selection_priors = self.selection_prior.rvs(n)
-        self.distortion_priors = None
-        if self.distortion_prior is not None:
-            self.distortion_priors = self.distortion_prior.rvs(n)
-        self.bias_priors = self.rnd.rand(n)
-        self.binnings = self.rnd.choice(self.bins, size=n)
+        self.bias_priors = self.rng.rand(n)
+        self.binnings = self.rng.choice(self.bins, size=n)
 
     def __iter__(self):
         self.n_samples = 0
         if not self.train:
-            self.rnd = np.random.RandomState(self.seed)
+            # Reinitialize Random Number Generator for consistent output
+            self.rng = check_random_state(self.seed)
+            # When using a distorter, reset it for consitent output in validation
+            if self.distortion is not None:
+                self.distortion.reset()
         if self.train:
             self.set_priors()
         return self
@@ -95,23 +74,19 @@ class SimulationData:
             if self.bias_priors[self.n_samples] < 0.5:
                 s = 0
 
-            j = np.zeros(self.timesteps)
-            j[0] = self.start
-            for i in range(1, self.timesteps):
-                p_star = j[i - 1] * (1 + s) / (j[i - 1] * s + self.n_agents)
-                j[i] = self.rnd.binomial(self.n_agents, min(p_star, 1))
+            j = wright_fisher(
+                self.n_agents, self.timesteps, s, start=self.start, random_state=self.rng)
 
             # apply distortions
             distortions = None
-            if self.distortion_prior:
-                ps = self.distortion_priors[len(j)]
-                distortions = self.rnd.binomial(j.astype(int), ps)
+            if self.distortion is not None:
+                distortions = self.distortion.distort(j)
                 j -= distortions
 
             # binning
             n_bins = self.binnings[self.n_samples]
-            j = apply_binning(j, n_bins, self.n_agents, rnd=self.rnd,
-                              variable=self.variable, distortions=distortions)
+            j = apply_binning(j, n_bins, self.n_agents, variable=self.variable,
+                              distortions=distortions, random_state=self.rng)
             self.n_samples += 1
 
             biased = int(s != 0)
@@ -132,20 +107,18 @@ class TestSimulationData(SimulationData):
             train=False,
         )
 
-        self.selection_priors = []
-        self.binnings = []
-        self.bias_priors = []
-
+        selection_priors, binnings, bias_priors = [], [], []
+        
         for bias in (0, 1):
             for binning in self.bins:
                 for selection in np.linspace(0, 1, n_sims):
-                    self.selection_priors.append(selection)
-                    self.binnings.append(binning)
-                    self.bias_priors.append(bias)
+                    selection_priors.append(selection)
+                    binnings.append(binning)
+                    bias_priors.append(bias)
 
-        self.selection_priors = np.array(self.selection_priors)
-        self.binnings = np.array(self.binnings)
-        self.bias_priors = np.array(self.bias_priors)
+        self.selection_priors = np.array(selection_priors)
+        self.binnings = np.array(binnings)
+        self.bias_priors = np.array(bias_priors)
 
         self.data = np.arange(len(self.binnings))
 
