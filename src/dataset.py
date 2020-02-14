@@ -97,8 +97,9 @@ class SimulationData:
 
 
 class TestSimulationData(SimulationData):
-    def __init__(self, start=0.5, n_sims=1000, n_bins=25, n_agents=1000, timesteps=200):
+    def __init__(self, distorter=None, start=0.5, n_sims=1000, n_bins=25, n_agents=1000, timesteps=200):
         super().__init__(
+            distortion=distorter
             start=start,
             n_sims=n_sims,
             n_agents=n_agents,
