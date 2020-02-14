@@ -1,17 +1,17 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from sklearn.metrics import accuracy_score
 
 from nets import FCN
 from dataset import SimulationData, TestSimulationData, DataLoader
+from utils import Distorter
 
 
 def make_seed():
@@ -21,7 +21,7 @@ def make_seed():
 
 
 class Trainer:
-    def __init__(self, model, train_loader, val_loader, device="cpu"):
+    def __init__(self, model, train_loader, val_loader, device="cpu") -> None:
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -30,9 +30,7 @@ class Trainer:
         self.val_loss = []
         self.val_scores = []
 
-    def fit(
-        self, n_epochs: int, learning_rate: float = 0.01, patience: int = 10
-    ) -> "Trainer":
+    def fit(self, n_epochs: int, learning_rate: float = 0.01, patience: int = 10):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         best_val_loss = np.inf
         patience_counter = 0
@@ -107,7 +105,7 @@ class Trainer:
         torch.save(save_dict, savepath)
         return savepath
 
-    def evaluate(self, test_loader):
+    def evaluate(self, test_loader) -> Dict:
         self.model.eval()
         results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], "bins": []}
         for labels, selection, bins, inputs in test_loader:
@@ -152,9 +150,6 @@ if __name__ == "__main__":
         help="Fraction of simulations to use for validation.",
     )
     parser.add_argument(
-        "--n_bins", type=int, default=1, help="Number of binning solutions."
-    )
-    parser.add_argument(
         "--timesteps",
         type=int,
         default=200,
@@ -167,10 +162,23 @@ if __name__ == "__main__":
         help="Number of epochs to train the Neural Networks.",
     )
     parser.add_argument(
+        "--variable_binning", action="store_true", help="Apply variable binning."
+    )
+    parser.add_argument(
+        "--distortion",
+        action="store_true",
+        help="Apply distortion to wright fisher simulations.",
+    )
+    parser.add_argument(
+        "--compute_frequency_increment_values",
+        action="store_true",
+        help="Compute frequency increment values for the time series."
+    )
+    parser.add_argument(
         "--learning_rate",
         type=float,
         default=0.01,
-        help="Learning rate forthe Adam optimizer.",
+        help="Learning rate for the Adam optimizer.",
     )
     parser.add_argument("--cuda", action="store_true", help="Use Cuda.")
     parser.add_argument(
@@ -192,28 +200,37 @@ if __name__ == "__main__":
     if args.seed is None:
         args.seed = make_seed()
 
+    train_distortion, val_distortion = None, None
+    if args.distortion:
+        train_distortion = Distorter(seed=args.seed)
+        val_distortion = Distorter(seed=args.seed + 1)
+
     train_data = SimulationData(
+        distortion=train_distortion,
+        variable_binning=args.variable_binning,
         start=args.start,
-        n_bins=args.n_bins,
         n_sims=args.n_sims,
         n_agents=args.n_agents,
         timesteps=args.timesteps,
         seed=args.seed,
+        compute_fiv=args.compute_frequency_increment_values,
     )
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size,)
+    train_loader = DataLoader(train_data, batch_size=args.batch_size)
 
     val_data = SimulationData(
+        distortion=val_distortion,
+        variable_binning=args.variable_binning,
         start=args.start,
-        n_bins=args.n_bins,
         n_sims=int(args.val_size * args.n_sims),
         n_agents=args.n_agents,
         timesteps=args.timesteps,
         seed=args.seed + 1,
         train=False,
+        compute_fiv=args.compute_frequency_increment_values
     )
 
-    val_loader = DataLoader(val_data, batch_size=args.batch_size,)
+    val_loader = DataLoader(val_data, batch_size=args.batch_size)
 
     if args.cuda and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -226,11 +243,17 @@ if __name__ == "__main__":
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
 
     if args.test:
+        test_distortion = None
+        if args.distortion:
+            test_distortion = Distorter(args.seed + 2)
         test_data = TestSimulationData(
+            distorter=test_distortion,
+            variable_binning=args.variable_binning,
             start=args.start,
             n_sims=args.n_sims,
             n_agents=args.n_agents,
             timesteps=args.timesteps,
+            compute_fiv=args.compute_fiv
         )
 
         test_loader = DataLoader(test_data, batch_size=args.batch_size)

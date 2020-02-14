@@ -1,4 +1,3 @@
-
 import numpy as np
 import scipy.stats as stats
 import torch.utils.data
@@ -7,6 +6,7 @@ import torch.nn.functional as F
 from typing import Tuple
 from utils import apply_binning, Distorter, check_random_state
 from simulation import wright_fisher
+from fit import frequency_increment_values
 
 
 class SimulationData:
@@ -16,18 +16,17 @@ class SimulationData:
         distortion: Distorter = None,
         variable_binning=False,
         start: float = 0.5,
-        n_bins: int = 1,
         n_sims: int = 1000,
         n_agents: int = 1000,
         timesteps: int = 200,
         seed: int = None,
+        compute_fiv: bool = False,
         train: bool = True,
-        min_bin_length: int = 4
+        min_bin_length: int = 4,
     ) -> None:
 
         self.rng = check_random_state(seed)
         self.selection_prior = stats.beta(selection_prior[0], selection_prior[1])
-        self.selection_prior.random_state = self.rng
         self.distortion = distortion
         if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
@@ -36,6 +35,7 @@ class SimulationData:
         self.start = start
         self.n_agents = n_agents
         self.timesteps = timesteps
+        self.compute_fiv = compute_fiv
         self.train = train
         self.seed = seed
 
@@ -52,7 +52,7 @@ class SimulationData:
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self.data)
-        self.selection_priors = self.selection_prior.rvs(n)
+        self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
         self.bias_priors = self.rng.rand(n)
         self.binnings = self.rng.choice(self.bins, size=n)
 
@@ -65,6 +65,7 @@ class SimulationData:
             if self.distortion is not None:
                 self.distortion.reset()
         if self.train:
+            # For new pass over the data, we want new random settings
             self.set_priors()
         return self
 
@@ -75,7 +76,12 @@ class SimulationData:
                 s = 0
 
             j = wright_fisher(
-                self.n_agents, self.timesteps, s, start=self.start, random_state=self.rng)
+                self.n_agents,
+                self.timesteps,
+                s,
+                start=self.start,
+                random_state=self.rng,
+            )
 
             # apply distortions
             distortions = None
@@ -85,11 +91,20 @@ class SimulationData:
 
             # binning
             n_bins = self.binnings[self.n_samples]
-            j = apply_binning(j, n_bins, self.n_agents, variable=self.variable,
-                              distortions=distortions, random_state=self.rng)
+            j = apply_binning(
+                j,
+                n_bins,
+                self.n_agents,
+                variable=self.variable,
+                distortions=distortions,
+                random_state=self.rng,
+            )
             self.n_samples += 1
 
             biased = int(s != 0)
+
+            if self.compute_fiv:
+                j = frequency_increment_values(np.arange(1, len(j) + 1), j, clip=True)
 
             return biased, s, n_bins, torch.FloatTensor(j)
 
@@ -97,19 +112,30 @@ class SimulationData:
 
 
 class TestSimulationData(SimulationData):
-    def __init__(self, distorter=None, start=0.5, n_sims=1000, n_bins=25, n_agents=1000, timesteps=200):
+    def __init__(
+        self,
+        distorter=None,
+        variable_binning=False,
+        start=0.5,
+        n_sims=1000,
+        n_bins=25,
+        n_agents=1000,
+        timesteps=200,
+        compute_fiv=False,
+    ) -> None:
+
         super().__init__(
-            distortion=distorter
+            distortion=distorter,
             start=start,
             n_sims=n_sims,
             n_agents=n_agents,
-            n_bins=n_bins,
             timesteps=timesteps,
             train=False,
+            compute_fiv=compute_fiv
         )
 
         selection_priors, binnings, bias_priors = [], [], []
-        
+
         for bias in (0, 1):
             for binning in self.bins:
                 for selection in np.linspace(0, 1, n_sims):
@@ -140,7 +166,11 @@ class DataLoader:
         if samples:
             yield self.collate(samples, dataset.timesteps)
 
-    def collate(self, data, length):
+    def collate(
+        self, data, length
+    ) -> Tuple[
+        torch.LongTensor, torch.FloatTensor, torch.LongTensor, torch.FloatTensor
+    ]:
         labels, selection, bins, outputs = zip(*data)
         padded_outputs = []
         for i, output in enumerate(outputs):
