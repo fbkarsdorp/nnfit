@@ -38,6 +38,7 @@ class SimulationData:
         self.compute_fiv = compute_fiv
         self.train = train
         self.seed = seed
+        self.n_samples = 0
 
         # sample bins following Karjus
         bins = {}
@@ -49,14 +50,17 @@ class SimulationData:
 
         self.set_priors()
 
+    def __len__(self):
+        return self.data.shape[0]
+
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
-        n = len(self.data)
+        n = len(self)
         self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
         self.bias_priors = self.rng.rand(n)
         self.binnings = self.rng.choice(self.bins, size=n)
 
-    def __iter__(self):
+    def reset(self):
         self.n_samples = 0
         if not self.train:
             # Reinitialize Random Number Generator for consistent output
@@ -69,7 +73,7 @@ class SimulationData:
             self.set_priors()
         return self
 
-    def __next__(self):
+    def next(self, n_bins=None):
         if self.n_samples < len(self.data):
             s = self.selection_priors[self.n_samples]
             if self.bias_priors[self.n_samples] < 0.5:
@@ -90,7 +94,8 @@ class SimulationData:
                 j -= distortions
 
             # binning
-            n_bins = self.binnings[self.n_samples]
+            if n_bins is None:
+                n_bins = self.binnings[self.n_samples]
             j = apply_binning(
                 j,
                 n_bins,
@@ -151,35 +156,36 @@ class TestSimulationData(SimulationData):
 
 
 class DataLoader:
-    def __init__(self, dataset: SimulationData, batch_size: int = 1) -> None:
+    def __init__(self, dataset: SimulationData, batch_size: int = 1, seed=None) -> None:
         self.dataset = dataset
         self.batch_size = batch_size
+        self.rng = check_random_state(seed)
+        self.seed = seed
 
     def __iter__(self):
-        dataset = iter(self.dataset)
-        samples = []
-        for sample in dataset:
-            samples.append(sample)
-            if len(samples) == self.batch_size:
-                yield self.collate(samples, dataset.timesteps)
-                samples = []
-        if samples:
-            yield self.collate(samples, dataset.timesteps)
+        self.dataset.reset()
+        if not self.dataset.train:
+            self.rng = check_random_state(self.seed)
 
-    def collate(
-        self, data, length
-    ) -> Tuple[
-        torch.LongTensor, torch.FloatTensor, torch.LongTensor, torch.FloatTensor
-    ]:
+        bin_sizes = self.rng.choice(
+            self.dataset.bins, size=len(self.dataset) // self.batch_size).tolist()
+
+        while bin_sizes:
+            n_bins = bin_sizes.pop()
+            samples = []
+            while len(samples) < self.batch_size:
+                try:
+                    samples.append(self.dataset.next(n_bins))
+                except StopIteration:
+                    break
+            yield self.collate(samples)
+
+
+    def collate(self, data):
         labels, selection, bins, outputs = zip(*data)
-        padded_outputs = []
-        for i, output in enumerate(outputs):
-            padded_outputs.append(
-                F.pad(output, (0, length - output.size(0)), "constant", 0)
-            )
         return (
             torch.LongTensor(labels),
             torch.FloatTensor(selection),
             torch.LongTensor(bins),
-            torch.stack(padded_outputs),
+            torch.stack(outputs),
         )
