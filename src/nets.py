@@ -71,3 +71,57 @@ class FCN(nn.Module):
         x = self.layers(x)
         return self.final(x.mean(dim=-1))
 
+
+class LSTMFCN(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        in_channels: int,
+        num_layers: int = 1,
+        num_classes: int = 1,
+        dropout: float = 0,
+        rnn_dropout: float = 0,
+        bidirectional: bool = False,
+    ) -> None:
+        super().__init__()
+
+        self.fcn = nn.Sequential(
+            ConvBlock(in_channels, 128, 8, 1),
+            ConvBlock(128, 256, 5, 1),
+            ConvBlock(256, 128, 3, 1),
+        )
+
+        self.hidden_size = hidden_size // (1 + bidirectional)
+        
+        self.lstm = nn.LSTM(
+            1,
+            self.hidden_size,
+            num_layers,
+            batch_first=True,
+            dropout=(num_layers > 1) * rnn_dropout,
+            bidirectional=bidirectional,
+        )
+        
+        self.final = nn.Linear(128 + self.hidden_size, num_classes)
+
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+        self.num_layers = num_layers
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_fcn = self.fcn(x)
+        x = x.transpose(2, 1)
+        emb = torch.nn.functional.dropout(x, p=self.dropout, training=self.training)
+        out, emb = self.lstm(emb)
+        if isinstance(emb, tuple):
+            emb, _ = emb
+        if self.bidirectional:
+            # (num_layers * num_directions x batch x hidden_size)
+            emb = emb.view(self.num_layers, self.bidirectional + 1, x.size(0), -1)
+            emb = emb[-1]  # take last layer
+            emb = torch.cat([emb[-2], emb[-1]], 1)
+        else:
+            emb = out
+        emb = emb.transpose(2, 1)
+        x = torch.cat([x_fcn, emb], 1)
+        return self.final(x.mean(dim=-1))

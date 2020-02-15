@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from sklearn.metrics import accuracy_score
 
-from nets import FCN
+from nets import FCN, LSTMFCN
 from dataset import SimulationData, TestSimulationData, DataLoader
 from utils import Distorter
 
@@ -156,6 +156,42 @@ if __name__ == "__main__":
         help="Number of timesteps/generations to run the simulation.",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        choices=("FCN", "LSTMFCN"),
+        default="FCN",
+        help="Neural architecture for training."
+    )
+    parser.add_argument(
+        "--hidden_size",
+        type=int,
+        default=64,
+        help="Hidden size of LSTM network"
+    )
+    parser.add_argument(
+        "--num_layers",
+        type=int,
+        default=1,
+        help="Number of layers in LSTM network"
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.0,
+        help="Dropout applied to time series."
+    )
+    parser.add_argument(
+        "--rnn_dropout",
+        type=float,
+        default=0.0,
+        help="Dropout applied between LSTM layers."
+    )
+    parser.add_argument(
+        "--bidirectional",
+        action="store_true",
+        help="Use a bidirectional LSTM network."
+    )
+    parser.add_argument(
         "--n_epochs",
         type=int,
         default=10,
@@ -238,7 +274,10 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    model = FCN(1, 1).to(device)
+    if args.model == "FCN":
+        model = FCN(1, 1).to(device)
+    else:
+        model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1, args.dropout, args.rnn_dropout, args.bidirectional)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
 
