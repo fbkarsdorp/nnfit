@@ -87,12 +87,6 @@ class SimulationData:
                 random_state=self.rng,
             )
 
-            # apply distortions
-            distortions = None
-            if self.distortion is not None:
-                distortions = self.distortion.distort(j)
-                j -= distortions
-
             # binning
             if n_bins is None:
                 n_bins = self.binnings[self.n_samples]
@@ -104,6 +98,10 @@ class SimulationData:
                 distortions=distortions,
                 random_state=self.rng,
             )
+
+            if self.distortion is not None:
+                j = self.distortion.distort(j)
+                
             self.n_samples += 1
 
             biased = int(s != 0)

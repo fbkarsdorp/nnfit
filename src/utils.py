@@ -36,12 +36,8 @@ def counters2array(counters):
     return array
 
 
-def apply_binning(counts, n_bins, n_agents, variable=False, distortions=None, random_state=None):
+def apply_binning(counts, n_bins, n_agents, variable=False, random_state=None):
     rng = check_random_state(random_state)
-    # produce relative frequency per bin
-    if distortions is None:
-        distortions = np.zeros_like(counts)
-    pop_size = n_agents - distortions
 
     if not variable:
         bins = np.array_split(np.arange(len(counts)), n_bins)
@@ -64,8 +60,8 @@ def apply_binning(counts, n_bins, n_agents, variable=False, distortions=None, ra
 
 
 class Distorter:
-    def __init__(self, prior=(0.5, 1.5), seed=None):
-        self.prior = stats.beta(prior[0], prior[1])
+    def __init__(self, loc=0, sd=0.2, seed=None):
+        self.prior = stats.norm(loc, sd)
         self.rng = check_random_state(seed)
         self.seed = seed
 
@@ -73,12 +69,13 @@ class Distorter:
         return self.prior.rvs(n, random_state=self.rng)
 
     def distort(self, values):
-        loss_prior = self._sample(values.shape[0])
-        return self.rng.binomial(values.astype(int), loss_prior)
+        values = np.array(values)
+        distortion = self._sample(values.shape[0])
+        return np.clip(values - distortion, 0, 1)
 
     def reset(self):
-        alpha, beta = self.prior.args
-        self.prior = stats.beta(alpha, beta)
+        loc, sd = self.prior.args
+        self.prior = stats.norm(loc, sd)
         self.rng = check_random_state(self.seed)
 
 
