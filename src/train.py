@@ -206,6 +206,12 @@ if __name__ == "__main__":
         help="Apply distortion to wright fisher simulations.",
     )
     parser.add_argument(
+        "--distortion_sd",
+        type=float,
+        default=0.1,
+        help="Distortion values sampled from N(0, distortion_sd)".
+    )
+    parser.add_argument(
         "--compute_frequency_increment_values",
         action="store_true",
         help="Compute frequency increment values for the time series."
@@ -238,8 +244,8 @@ if __name__ == "__main__":
 
     train_distortion, val_distortion = None, None
     if args.distortion:
-        train_distortion = Distorter(seed=args.seed)
-        val_distortion = Distorter(seed=args.seed + 1)
+        train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
+        val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
 
     train_data = SimulationData(
         distortion=train_distortion,
@@ -277,14 +283,15 @@ if __name__ == "__main__":
     if args.model == "FCN":
         model = FCN(1, 1).to(device)
     else:
-        model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1, args.dropout, args.rnn_dropout, args.bidirectional)
+        model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
+                        args.dropout, args.rnn_dropout, args.bidirectional).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
 
     if args.test:
         test_distortion = None
         if args.distortion:
-            test_distortion = Distorter(args.seed + 2)
+            test_distortion = Distorter(loc=0, sd=args.distortion_sd, args.seed + 2)
         test_data = TestSimulationData(
             distorter=test_distortion,
             variable_binning=args.variable_binning,
