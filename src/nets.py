@@ -102,7 +102,7 @@ class LSTMFCN(nn.Module):
             bidirectional=bidirectional,
         )
         
-        self.final = nn.Linear(128 + self.hidden_size, num_classes)
+        self.final = nn.Linear(128 + self.hidden_size * (1 + bidirectional), num_classes)
 
         self.dropout = dropout
         self.bidirectional = bidirectional
@@ -112,16 +112,59 @@ class LSTMFCN(nn.Module):
         x_fcn = self.fcn(x)
         x = x.transpose(2, 1)
         emb = torch.nn.functional.dropout(x, p=self.dropout, training=self.training)
-        out, emb = self.lstm(emb)
-        if isinstance(emb, tuple):
-            emb, _ = emb
-        if self.bidirectional:
-            # (num_layers * num_directions x batch x hidden_size)
-            emb = emb.view(self.num_layers, self.bidirectional + 1, x.size(0), -1)
-            emb = emb[-1]  # take last layer
-            emb = torch.cat([emb[-2], emb[-1]], 1)
-        else:
-            emb = out
-        emb = emb.transpose(2, 1)
-        x = torch.cat([x_fcn, emb], 1)
+        out, (hn, _) = self.lstm(emb)
+        return self.final(torch.cat([x_fcn.mean(dim=-1), hn[-1]], 1))
+
+
+class ResNet(nn.Module):
+
+    def __init__(self, in_channels: int, mid_channels: int = 64,
+                 num_pred_classes: int = 1) -> None:
+        super().__init__()
+
+        # for easier saving and loading
+        self.input_args = {
+            'in_channels': in_channels,
+            'num_pred_classes': num_pred_classes
+        }
+
+        self.layers = nn.Sequential(*[
+            ResNetBlock(in_channels=in_channels, out_channels=mid_channels),
+            ResNetBlock(in_channels=mid_channels, out_channels=mid_channels * 2),
+            ResNetBlock(in_channels=mid_channels * 2, out_channels=mid_channels * 2),
+
+        ])
+        self.final = nn.Linear(mid_channels * 2, num_pred_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore
+        x = self.layers(x)
         return self.final(x.mean(dim=-1))
+
+
+class ResNetBlock(nn.Module):
+
+    def __init__(self, in_channels: int, out_channels: int) -> None:
+        super().__init__()
+
+        channels = [in_channels, out_channels, out_channels, out_channels]
+        kernel_sizes = [8, 5, 3]
+
+        self.layers = nn.Sequential(*[
+            ConvBlock(in_channels=channels[i], out_channels=channels[i + 1],
+                      kernel_size=kernel_sizes[i], stride=1) for i in range(len(kernel_sizes))
+        ])
+
+        self.match_channels = False
+        if in_channels != out_channels:
+            self.match_channels = True
+            self.residual = nn.Sequential(*[
+                Conv1dSamePadding(in_channels=in_channels, out_channels=out_channels,
+                                  kernel_size=1, stride=1),
+                nn.BatchNorm1d(num_features=out_channels)
+            ])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore
+
+        if self.match_channels:
+            return self.layers(x) + self.residual(x)
+        return self.layers(x)

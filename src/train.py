@@ -1,16 +1,21 @@
 import argparse
+import json
+import os
+import uuid
+
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score, classification_report
 
-from nets import FCN, LSTMFCN
-from dataset import SimulationData, TestSimulationData, DataLoader
+from nets import FCN, LSTMFCN, ResNet
+from dataset import SimulationData, TestSimulationData, DataLoader, TestLoader
 from utils import Distorter
 
 
@@ -32,12 +37,13 @@ class Trainer:
 
     def fit(self, n_epochs: int, learning_rate: float = 0.01, patience: int = 10):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        # optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
         best_val_loss = np.inf
         patience_counter = 0
         best_state_dict = None
 
-        self.model.train()
         for epoch in range(n_epochs):
+            self.model.train()
 
             train_loss = []
             for labels, _, _, inputs in self.train_loader:
@@ -56,9 +62,9 @@ class Trainer:
             self.train_loss.append(np.mean(train_loss))
 
             val_loss, y_true, y_pred = [], [], []
-            self.model.eval()
-            for labels, _, _, inputs in self.val_loader:
-                with torch.no_grad():
+            with torch.no_grad():
+                self.model.eval()
+                for labels, _, _, inputs in self.val_loader:
                     labels, inputs = (
                         labels.to(self.device),
                         inputs.to(self.device).unsqueeze(1),
@@ -68,8 +74,8 @@ class Trainer:
                         outputs, labels.unsqueeze(-1).float()
                     )
                     val_loss.append(loss.item())
-                    preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5).tolist()
-                    y_pred.extend(preds)
+                    preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5)
+                    y_pred.extend(preds.squeeze(1).astype(int).tolist())
                     y_true.extend(labels.cpu().numpy().tolist())
 
             self.val_scores.append(accuracy_score(y_true, y_pred))
@@ -79,8 +85,10 @@ class Trainer:
                 f"Epoch: {epoch + 1}, "
                 f"Train loss: {self.train_loss[-1]:.3f}, "
                 f"Val loss: {self.val_loss[-1]:.3f}, "
-                f"Val accuracy: {self.val_scores[-1]:.3f}"
+                f"Val accuracy: {self.val_scores[-1]:.3f} "
+                f"{'NEW BEST' if self.val_loss[-1] < best_val_loss else ''}"
             )
+            print(classification_report(y_true, y_pred, digits=3))
 
             if self.val_loss[-1] < best_val_loss:
                 best_val_loss = self.val_loss[-1]
@@ -158,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        choices=("FCN", "LSTMFCN"),
+        choices=("FCN", "LSTMFCN", "RESNET"),
         default="FCN",
         help="Neural architecture for training."
     )
@@ -209,7 +217,7 @@ if __name__ == "__main__":
         "--distortion_sd",
         type=float,
         default=0.1,
-        help="Distortion values sampled from N(0, distortion_sd)".
+        help="Distortion values sampled from N(0, distortion_sd)",
     )
     parser.add_argument(
         "--compute_frequency_increment_values",
@@ -258,7 +266,7 @@ if __name__ == "__main__":
         compute_fiv=args.compute_frequency_increment_values,
     )
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size)
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
 
     val_data = SimulationData(
         distortion=val_distortion,
@@ -272,7 +280,7 @@ if __name__ == "__main__":
         compute_fiv=args.compute_frequency_increment_values
     )
 
-    val_loader = DataLoader(val_data, batch_size=args.batch_size)
+    val_loader = DataLoader(val_data, batch_size=args.batch_size, seed=args.seed + 1)
 
     if args.cuda and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -282,16 +290,20 @@ if __name__ == "__main__":
 
     if args.model == "FCN":
         model = FCN(1, 1).to(device)
-    else:
+    elif args.model == "LSTMFCN":
         model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
                         args.dropout, args.rnn_dropout, args.bidirectional).to(device)
+    else:
+        model = ResNet(1).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
 
     if args.test:
+        if not os.path.exists("../results"):
+            os.makedirs("../results")
         test_distortion = None
         if args.distortion:
-            test_distortion = Distorter(loc=0, sd=args.distortion_sd, args.seed + 2)
+            test_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 2)
         test_data = TestSimulationData(
             distorter=test_distortion,
             variable_binning=args.variable_binning,
@@ -299,8 +311,17 @@ if __name__ == "__main__":
             n_sims=args.n_sims,
             n_agents=args.n_agents,
             timesteps=args.timesteps,
-            compute_fiv=args.compute_fiv
+            compute_fiv=args.compute_frequency_increment_values
         )
 
-        test_loader = DataLoader(test_data, batch_size=args.batch_size)
+        test_loader = TestLoader(test_data, batch_size=args.batch_size)
         results = trainer.evaluate(test_loader)
+        run_id = str(uuid.uuid1())[:8]
+        print(classification_report(results['y_true'], results['y_pred']))
+        accuracy = accuracy_score(results['y_true'], results['y_pred'])
+        with open(f"../results/{run_id}.json", "w") as out:
+            arguments = vars(args)
+            arguments["accuracy"] = accuracy
+            json.dump(arguments, out)
+        pd.DataFrame(results).to_csv(f"../results/{run_id}.csv", index=False)
+            

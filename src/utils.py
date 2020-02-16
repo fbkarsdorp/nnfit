@@ -38,15 +38,14 @@ def counters2array(counters):
 
 def apply_binning(counts, n_bins, n_agents, variable=False, random_state=None):
     rng = check_random_state(random_state)
+    pop_size = np.full(counts.shape[0], n_agents)    
 
     if not variable:
         bins = np.array_split(np.arange(len(counts)), n_bins)
-        return [
-            (counts[b].sum() / pop_size[b].sum()) if pop_size[b].sum() > 0 else 0
-            for b in bins
-        ]
+        return [(counts[b].sum() / pop_size[b].sum()) for b in bins]
 
     # assume variable
+    # TODO: clean up
     output = np.zeros(sum(pop_size))
     cur = 0
     for count, c_pop_size in zip(counts.astype(int).tolist(), pop_size.tolist()):

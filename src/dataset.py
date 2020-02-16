@@ -95,13 +95,12 @@ class SimulationData:
                 n_bins,
                 self.n_agents,
                 variable=self.variable,
-                distortions=distortions,
                 random_state=self.rng,
             )
 
             if self.distortion is not None:
                 j = self.distortion.distort(j)
-                
+
             self.n_samples += 1
 
             biased = int(s != 0)
@@ -154,7 +153,7 @@ class TestSimulationData(SimulationData):
 
 
 class DataLoader:
-    def __init__(self, dataset: SimulationData, batch_size: int = 1, seed=None) -> None:
+    def __init__(self, dataset: SimulationData, batch_size: int = 1, seed: int = None) -> None:
         self.dataset = dataset
         self.batch_size = batch_size
         self.rng = check_random_state(seed)
@@ -187,3 +186,18 @@ class DataLoader:
             torch.LongTensor(bins),
             torch.stack(outputs),
         )
+
+
+class TestLoader(DataLoader):
+    def __init__(self, dataset: TestSimulationData, batch_size: int = 1) -> None:
+        super().__init__(dataset, batch_size)
+
+    def __iter__(self):
+        while self.dataset.n_samples < len(self.dataset.data):
+            samples = []
+            while len(samples) < self.batch_size:
+                try:
+                    samples.append(self.dataset.next())
+                except StopIteration:
+                    break
+            yield self.collate(samples)
