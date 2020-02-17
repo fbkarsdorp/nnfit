@@ -58,6 +58,7 @@ class SimulationData:
         n = len(self)
         self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
         self.bias_priors = self.rng.rand(n)
+        # self.start = self.rng.uniform(0, 0.5, size=n)
         self.binnings = self.rng.choice(self.bins, size=n)
 
     def reset(self):
@@ -83,6 +84,7 @@ class SimulationData:
                 self.n_agents,
                 self.timesteps,
                 s,
+                # start=self.start[self.n_samples],
                 start=self.start,
                 random_state=self.rng,
             )
@@ -136,18 +138,20 @@ class TestSimulationData(SimulationData):
             compute_fiv=compute_fiv
         )
 
-        selection_priors, binnings, bias_priors = [], [], []
+        selection_priors, binnings, bias_priors, start_values = [], [], [], []
 
         for bias in (0, 1):
             for binning in self.bins:
                 for selection in np.linspace(0, 1, n_sims):
                     selection_priors.append(selection)
                     binnings.append(binning)
+                    start_values.append(start)
                     bias_priors.append(bias)
 
         self.selection_priors = np.array(selection_priors)
         self.binnings = np.array(binnings)
         self.bias_priors = np.array(bias_priors)
+        # self.start = np.array(start_values)
 
         self.data = np.arange(len(self.binnings))
 

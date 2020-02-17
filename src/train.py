@@ -37,6 +37,7 @@ class Trainer:
 
     def fit(self, n_epochs: int, learning_rate: float = 0.01, patience: int = 10):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
         # optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
         best_val_loss = np.inf
         patience_counter = 0
@@ -78,8 +79,11 @@ class Trainer:
                     y_pred.extend(preds.squeeze(1).astype(int).tolist())
                     y_true.extend(labels.cpu().numpy().tolist())
 
+            
             self.val_scores.append(accuracy_score(y_true, y_pred))
             self.val_loss.append(np.mean(val_loss))
+
+            lr_scheduler.step(self.val_loss[-1])
 
             print(
                 f"Epoch: {epoch + 1}, "
@@ -209,6 +213,13 @@ if __name__ == "__main__":
         "--variable_binning", action="store_true", help="Apply variable binning."
     )
     parser.add_argument(
+        "--selection_params",
+        type=float,
+        nargs=2,
+        default=(1, 5),
+        help="Alpha and Beta hyperparameter of the selection strength Beta distribution."
+    )
+    parser.add_argument(
         "--distortion",
         action="store_true",
         help="Apply distortion to wright fisher simulations.",
@@ -250,12 +261,15 @@ if __name__ == "__main__":
     if args.seed is None:
         args.seed = make_seed()
 
+    torch.manual_seed(args.seed)
+
     train_distortion, val_distortion = None, None
     if args.distortion:
         train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
         val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
 
     train_data = SimulationData(
+        selection_prior=args.selection_params,
         distortion=train_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
@@ -269,6 +283,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
 
     val_data = SimulationData(
+        selection_prior=args.selection_params,
         distortion=val_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
@@ -319,9 +334,17 @@ if __name__ == "__main__":
         run_id = str(uuid.uuid1())[:8]
         print(classification_report(results['y_true'], results['y_pred']))
         accuracy = accuracy_score(results['y_true'], results['y_pred'])
+
+        selection = np.array(results['selection'])
+        y_true, y_pred = np.array(results['y_true']), np.array(results['y_pred'])
+        indexes = (selection > 0) & (selection < 0.1)
+        accuracy_hard = accuracy_score(y_true[indexes], y_pred[indexes])
+        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy:.3f}")
+
         with open(f"../results/{run_id}.json", "w") as out:
             arguments = vars(args)
             arguments["accuracy"] = accuracy
+            arguments["accuracy_hard"] = accuracy_hard
             json.dump(arguments, out)
         pd.DataFrame(results).to_csv(f"../results/{run_id}.csv", index=False)
             
