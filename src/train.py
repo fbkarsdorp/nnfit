@@ -12,7 +12,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report
 
 from nets import FCN, LSTMFCN, ResNet
 from dataset import SimulationData, TestSimulationData, DataLoader, TestLoader
@@ -35,9 +35,9 @@ class Trainer:
         self.val_loss = []
         self.val_scores = []
 
-    def fit(self, n_epochs: int, learning_rate: float = 0.01, patience: int = 10):
+    def fit(self, n_epochs: int, learning_rate: float = 0.01, early_stop_patience: int = 10, lr_patience: int = 2):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_patience, verbose=True)
         # optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
         best_val_loss = np.inf
         patience_counter = 0
@@ -100,7 +100,7 @@ class Trainer:
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter == patience:
+                if patience_counter == early_stop_patience:
                     if best_state_dict is not None:
                         self.model.load_state_dict(best_state_dict)
                     print("Early stopping...")
@@ -241,9 +241,15 @@ if __name__ == "__main__":
         default=0.01,
         help="Learning rate for the Adam optimizer.",
     )
+    parser.add_argument(
+        "--learning_rate_patience",
+        type=int,
+        default=3,
+        help="Number of epochs without improvement before reducing the learning rate."
+    )
     parser.add_argument("--cuda", action="store_true", help="Use Cuda.")
     parser.add_argument(
-        "--patience",
+        "--early_stop_patience",
         type=int,
         default=10,
         help="Number of allowed epochs without improvement.",
@@ -311,7 +317,8 @@ if __name__ == "__main__":
     else:
         model = ResNet(1).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
-    trainer.fit(args.n_epochs, learning_rate=args.learning_rate, patience=args.patience)
+    trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
+                lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience)
 
     if args.test:
         if not os.path.exists("../results"):
@@ -332,14 +339,14 @@ if __name__ == "__main__":
         test_loader = TestLoader(test_data, batch_size=args.batch_size)
         results = trainer.evaluate(test_loader)
         run_id = str(uuid.uuid1())[:8]
-        print(classification_report(results['y_true'], results['y_pred']))
+        print(classification_report(results['y_true'], results['y_pred'], digits=3))
         accuracy = accuracy_score(results['y_true'], results['y_pred'])
 
         selection = np.array(results['selection'])
         y_true, y_pred = np.array(results['y_true']), np.array(results['y_pred'])
         indexes = (selection > 0) & (selection < 0.1)
         accuracy_hard = accuracy_score(y_true[indexes], y_pred[indexes])
-        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy:.3f}")
+        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy_hard:.3f}")
 
         with open(f"../results/{run_id}.json", "w") as out:
             arguments = vars(args)
