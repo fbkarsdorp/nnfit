@@ -19,8 +19,9 @@ def frequency_increment_values(time, values, clip=False):
 
 def frequency_increment_test(time, values):
     Y = frequency_increment_values(time, values, clip=True)
-    t, p = stats.ttest_1samp(Y, 0)
-    return t, p
+    T, Tp = stats.ttest_1samp(Y, 0)
+    W, Wp = stats.shapiro(Y)
+    return {"T": T, "Tp": Tp, "W": W, "Wp": Wp}
 
 
 def bayesian_frequency_increment_test(time, values, n_iter=10_000, ci=0.89):
