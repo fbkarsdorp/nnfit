@@ -1,7 +1,6 @@
 import numpy as np
 import scipy.stats as stats
 import torch.utils.data
-import torch.nn.functional as F
 
 from typing import Tuple
 from utils import apply_binning, Distorter, check_random_state
@@ -16,6 +15,7 @@ class SimulationData:
         distortion: Distorter = None,
         variable_binning=False,
         start: float = 0.5,
+        varying_start_value = False,
         n_sims: int = 1000,
         n_agents: int = 1000,
         timesteps: int = 200,
@@ -33,6 +33,7 @@ class SimulationData:
         self.variable = variable_binning
         self.data = np.arange(n_sims)
         self.start = start
+        self.varying_start_value = varying_start_value
         self.n_agents = n_agents
         self.timesteps = timesteps
         self.compute_fiv = compute_fiv
@@ -58,7 +59,10 @@ class SimulationData:
         n = len(self)
         self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
         self.bias_priors = self.rng.rand(n)
-        self.start = self.rng.uniform(0, 0.5, size=n)
+        if self.varying_start_value:
+            self.start = self.rng.uniform(0, 0.5, size=n)
+        else:
+            self.start = np.full(n, self.start)
         self.binnings = self.rng.choice(self.bins, size=n)
 
     def reset(self):
@@ -85,7 +89,6 @@ class SimulationData:
                 self.timesteps,
                 s,
                 start=self.start[self.n_samples],
-                # start=self.start,
                 random_state=self.rng,
             )
 

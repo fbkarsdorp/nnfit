@@ -7,19 +7,19 @@ import pandas as pd
 
 from simulation import wright_fisher
 from fit import frequency_increment_test
+from utils import apply_binning, Distorter
 
 
 def simulate(args):
-    N, T, ss, bin_size, start = args
-    data = wright_fisher(N, T, ss, start=start) / N
-    time = np.arange(1, T + 1)
-    # TODO: connect to binning function
-    # if bin_size is not None:
-    #     data, time = apply_binning(data, bin_size)
+    N, T, ss, n_bins, start = args
+    data = wright_fisher(N, T, ss, start=start)
+    data = apply_binning(data, n_bins, N)
+    time = np.arange(1, data.shape[0] + 1)
 
     fit = frequency_increment_test(time, data)
     return {
-        "bin_size": bin_size,
+        "start": start,
+        "bin_size": n_bins,
         "selection_strength": ss,
         "t_statistic": fit["T"],
         "t_test_p_value": fit["Tp"],
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--N", type=int, default=1000, help="Population size.")
     parser.add_argument("--T", type=int, default=200, help="Number of timesteps.")
-    parser.add_argument("--sims", type=int, default=100, help="Number of repetitions.")
+    parser.add_argument("--sims", type=int, default=1000, help="Number of repetitions.")
     parser.add_argument("--bins", nargs="+", default=None, help="Bin sizes.")
     parser.add_argument(
         "--n_sel", type=int, default=200, help="Number of selection values."

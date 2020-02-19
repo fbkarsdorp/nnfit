@@ -108,13 +108,7 @@ class Trainer:
         return self
 
     def save_model(self, savepath: Path) -> Path:
-        save_dict = {
-            "model": {
-                "model_class": self.model.__class__.__name__,
-                "state_dict": self.model.state_dict(),
-            }
-        }
-        torch.save(save_dict, savepath)
+        torch.save(self.model.state_dict(), f'../results/{savepath}.pt')
         return savepath
 
     def evaluate(self, test_loader) -> Dict:
@@ -137,7 +131,99 @@ class Trainer:
         return results
 
 
-if __name__ == "__main__":
+def run_experiment(args):
+    train_distortion, val_distortion = None, None
+    if args.distortion:
+        train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
+        val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
+
+    train_data = SimulationData(
+        selection_prior=args.selection_params,
+        distortion=train_distortion,
+        variable_binning=args.variable_binning,
+        start=args.start,
+        varying_start_value=args.varying_start_value,
+        n_sims=args.n_sims,
+        n_agents=args.n_agents,
+        timesteps=args.timesteps,
+        seed=args.seed,
+        compute_fiv=args.compute_frequency_increment_values,
+    )
+
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
+
+    val_data = SimulationData(
+        selection_prior=args.selection_params,
+        distortion=val_distortion,
+        variable_binning=args.variable_binning,
+        start=args.start,
+        varying_start_value=args.varying_start_value,
+        n_sims=int(args.val_size * args.n_sims),
+        n_agents=args.n_agents,
+        timesteps=args.timesteps,
+        seed=args.seed + 1,
+        train=False,
+        compute_fiv=args.compute_frequency_increment_values
+    )
+
+    val_loader = DataLoader(val_data, batch_size=args.batch_size, seed=args.seed + 1)
+
+    if args.cuda and torch.cuda.is_available():
+        device = torch.device("cuda")
+        print("Using GPU")
+    else:
+        device = torch.device("cpu")
+
+    if args.model == "FCN":
+        model = FCN(1, 1).to(device)
+    elif args.model == "LSTMFCN":
+        model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
+                        args.dropout, args.rnn_dropout, args.bidirectional).to(device)
+    else:
+        model = ResNet(1).to(device)
+    trainer = Trainer(model, train_loader, val_loader, device=device)
+    trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
+                lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience)
+
+    run_id = str(uuid.uuid1())[:8] if args.outfile is None else args.outfile
+    trainer.save_model(run_id)
+
+    if args.test:
+        if not os.path.exists("../results"):
+            os.makedirs("../results")
+        test_distortion = None
+        if args.distortion:
+            test_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 2)
+        test_data = TestSimulationData(
+            distorter=test_distortion,
+            variable_binning=args.variable_binning,
+            start=args.start,
+            n_sims=args.n_sims,
+            n_agents=args.n_agents,
+            timesteps=args.timesteps,
+            compute_fiv=args.compute_frequency_increment_values
+        )
+
+        test_loader = TestLoader(test_data, batch_size=args.batch_size)
+        results = trainer.evaluate(test_loader)
+        print(classification_report(results['y_true'], results['y_pred'], digits=3))
+        accuracy = accuracy_score(results['y_true'], results['y_pred'])
+
+        selection = np.array(results['selection'])
+        y_true, y_pred = np.array(results['y_true']), np.array(results['y_pred'])
+        indexes = (selection > 0) & (selection < 0.1)
+        accuracy_hard = accuracy_score(y_true[indexes], y_pred[indexes])
+        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy_hard:.3f}")
+
+        with open(f"../results/{run_id}.json", "w") as out:
+            arguments = vars(args)
+            arguments["accuracy"] = accuracy
+            arguments["accuracy_hard"] = accuracy_hard
+            json.dump(arguments, out)
+        pd.DataFrame(results).to_csv(f"../results/{run_id}.csv", index=False)
+
+
+def get_arguments():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -151,6 +237,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--start", type=float, default=0.5, help="Relative start frequency of trait."
+    )
+    parser.add_argument(
+        "--varying_start_value", action="store_true",
+        help="Varying relative start frequency of traits."
     )
     parser.add_argument(
         "--batch_size", type=int, default=50, help="Number of simulations per batch."
@@ -261,97 +351,17 @@ if __name__ == "__main__":
         "--test", action="store_true", help="Apply models to linspace test set."
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed number.")
+    parser.add_argument("--outfile", type=str, default=None)
 
     args = parser.parse_args()
-
+    
     if args.seed is None:
         args.seed = make_seed()
 
+    return args
+
+
+if __name__ == '__main__':
+    args = get_arguments()
     torch.manual_seed(args.seed)
-
-    train_distortion, val_distortion = None, None
-    if args.distortion:
-        train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
-        val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
-
-    train_data = SimulationData(
-        selection_prior=args.selection_params,
-        distortion=train_distortion,
-        variable_binning=args.variable_binning,
-        start=args.start,
-        n_sims=args.n_sims,
-        n_agents=args.n_agents,
-        timesteps=args.timesteps,
-        seed=args.seed,
-        compute_fiv=args.compute_frequency_increment_values,
-    )
-
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
-
-    val_data = SimulationData(
-        selection_prior=args.selection_params,
-        distortion=val_distortion,
-        variable_binning=args.variable_binning,
-        start=args.start,
-        n_sims=int(args.val_size * args.n_sims),
-        n_agents=args.n_agents,
-        timesteps=args.timesteps,
-        seed=args.seed + 1,
-        train=False,
-        compute_fiv=args.compute_frequency_increment_values
-    )
-
-    val_loader = DataLoader(val_data, batch_size=args.batch_size, seed=args.seed + 1)
-
-    if args.cuda and torch.cuda.is_available():
-        device = torch.device("cuda")
-        print("Using GPU")
-    else:
-        device = torch.device("cpu")
-
-    if args.model == "FCN":
-        model = FCN(1, 1).to(device)
-    elif args.model == "LSTMFCN":
-        model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
-                        args.dropout, args.rnn_dropout, args.bidirectional).to(device)
-    else:
-        model = ResNet(1).to(device)
-    trainer = Trainer(model, train_loader, val_loader, device=device)
-    trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
-                lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience)
-
-    if args.test:
-        if not os.path.exists("../results"):
-            os.makedirs("../results")
-        test_distortion = None
-        if args.distortion:
-            test_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 2)
-        test_data = TestSimulationData(
-            distorter=test_distortion,
-            variable_binning=args.variable_binning,
-            start=args.start,
-            n_sims=args.n_sims,
-            n_agents=args.n_agents,
-            timesteps=args.timesteps,
-            compute_fiv=args.compute_frequency_increment_values
-        )
-
-        test_loader = TestLoader(test_data, batch_size=args.batch_size)
-        results = trainer.evaluate(test_loader)
-        run_id = str(uuid.uuid1())[:8]
-        print(classification_report(results['y_true'], results['y_pred'], digits=3))
-        accuracy = accuracy_score(results['y_true'], results['y_pred'])
-
-        selection = np.array(results['selection'])
-        y_true, y_pred = np.array(results['y_true']), np.array(results['y_pred'])
-        indexes = (selection > 0) & (selection < 0.1)
-        accuracy_hard = accuracy_score(y_true[indexes], y_pred[indexes])
-        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy_hard:.3f}")
-
-        with open(f"../results/{run_id}.json", "w") as out:
-            arguments = vars(args)
-            arguments["accuracy"] = accuracy
-            arguments["accuracy_hard"] = accuracy_hard
-            json.dump(arguments, out)
-        pd.DataFrame(results).to_csv(f"../results/{run_id}.csv", index=False)
-            
+    run_experiment(args)
