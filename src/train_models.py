@@ -5,6 +5,7 @@ CONFIG = {
     "n_sims": 1000,
     "batch_size": 100,
     "val_size": 1,
+    "start": 0.5,
     "model": "RESNET",
     "n_epochs": 100,
     "selection_params": (1, 5),
@@ -36,5 +37,8 @@ for n_agents in N_AGENTS:
                 args.varying_start_value = varying_start_value
                 args.timesteps = timesteps
                 args.distortion = distortion
+
+                dict_args = vars(args)
+                dict_args.update(CONFIG)
                 
                 run_experiment(args)

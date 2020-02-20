@@ -186,6 +186,8 @@ def run_experiment(args):
                 lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience)
 
     run_id = str(uuid.uuid1())[:8] if args.outfile is None else args.outfile
+
+    trainer.model.eval()
     trainer.save_model(run_id)
 
     if args.test:
