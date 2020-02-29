@@ -10,14 +10,16 @@ CONFIG = {
     "n_epochs": 100,
     "selection_params": (1, 5),
     "learning_rate": 0.01,
-    "cuda": True
+    "cuda": True,
+    "compute_frequency_increment_values": True
 }
 
 
-def make_path(n_agents, varying_start, timesteps, distortion):
+def make_path(n_agents, varying_start, timesteps, distortion, fiv):
     start = "vstart" if varying_start else "fstart"
+    fiv = "_fiv" if fiv else ""
     distortion = "_distortion" if distortion else ""
-    return f'{n_agents}_{start}_{timesteps}{distortion}'
+    return f'{n_agents}_{start}_{timesteps}{distortion}{fiv}'
 
 
 N_AGENTS = list(range(1000, 11000, 1000))
