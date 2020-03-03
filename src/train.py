@@ -26,6 +26,11 @@ def make_seed():
     return seed
 
 
+def classification_report(df):
+    print(df.groupby('bin')['correct'].mean())
+    
+
+
 class Trainer:
     def __init__(self, model, train_loader, val_loader, device="cpu") -> None:
         self.model = model
@@ -100,8 +105,11 @@ class Trainer:
                 *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
 
+            df['selection_bin'] = pd.cut(df['selection'], [-0.001, 0.001, 0.01, 0.1, 1])
+            print(df.sample(10).head())
             print(df.groupby('bin')['correct'].mean())
-            print(df.loc[df['selection'] == 0, 'correct'].mean())
+            print(df.groupby('selection')['correct'].mean())
+            print(df.groupby('selection_bin')['correct'].mean())
 
             lr_scheduler.step(self.val_scores[-1])
 

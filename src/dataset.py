@@ -26,7 +26,7 @@ class SimulationData:
     ) -> None:
 
         self.rng = check_random_state(seed)
-        self.selection_prior = stats.beta(selection_prior[0], selection_prior[1])
+        self.selection_prior = stats.loguniform(0.001, 1)
         self.distortion = distortion
         if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
@@ -57,7 +57,7 @@ class SimulationData:
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self)
-        self.selection_priors = np.clip(self.selection_prior.rvs(n, random_state=self.rng), 0.001, 1)
+        self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
         self.bias_priors = self.rng.rand(n)
         if self.varying_start_value:
             self.start = self.rng.uniform(0.001, 1, size=n)
@@ -149,14 +149,17 @@ class TestSimulationData(SimulationData):
         self.n_samples = 0
 
         selection_priors, binnings, bias_priors, start_values = [], [], [], []
+        selection_values = np.concatenate(
+            ([0], np.exp(np.linspace(np.log(0.001), np.log(1), 25 - 1))))
 
-        for binning in self.bins:
-            for rep in range(10):
-                for selection in np.linspace(0.001, 0.1, self.n_sims):
-                    selection_priors.append(selection)
-                    binnings.append(binning)
-                    start_values.append(self.init_start)
-                    bias_priors.append(np.random.randint(0, 2))
+        for bias in (0, 1):
+            for binning in self.bins:
+                for selection in selection_values:
+                    for rep in range(10):
+                        selection_priors.append(selection)
+                        binnings.append(binning)
+                        start_values.append(self.init_start)
+                        bias_priors.append(bias)
 
         self.selection_priors = np.array(selection_priors)
         self.binnings = np.array(binnings)
