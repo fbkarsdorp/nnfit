@@ -15,7 +15,7 @@ class SimulationData:
         distortion: Distorter = None,
         variable_binning=False,
         start: float = 0.5,
-        varying_start_value = False,
+        varying_start_value: bool = False,
         n_sims: int = 1000,
         n_agents: int = 1000,
         timesteps: int = 200,
@@ -57,10 +57,10 @@ class SimulationData:
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self)
-        self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
+        self.selection_priors = np.clip(self.selection_prior.rvs(n, random_state=self.rng), 0.001, 1)
         self.bias_priors = self.rng.rand(n)
         if self.varying_start_value:
-            self.start = self.rng.uniform(0, 0.5, size=n)
+            self.start = self.rng.uniform(0.001, 1, size=n)
         else:
             self.start = np.full(n, self.start)
         self.binnings = self.rng.choice(self.bins, size=n)
@@ -121,7 +121,7 @@ class SimulationData:
 class TestSimulationData(SimulationData):
     def __init__(
         self,
-        distorter=None,
+        distortion=None,
         variable_binning=False,
         start=0.5,
         n_sims=1000,
@@ -132,7 +132,7 @@ class TestSimulationData(SimulationData):
     ) -> None:
 
         super().__init__(
-            distortion=distorter,
+            distortion=distortion,
             start=start,
             n_sims=n_sims,
             n_agents=n_agents,
@@ -141,15 +141,22 @@ class TestSimulationData(SimulationData):
             compute_fiv=compute_fiv
         )
 
+        self.n_sims = n_sims
+        self.init_start = start
+        self.init_samples()
+
+    def init_samples(self):
+        self.n_samples = 0
+
         selection_priors, binnings, bias_priors, start_values = [], [], [], []
 
-        for bias in (0, 1):
-            for binning in self.bins:
-                for selection in np.linspace(0, 1, n_sims):
+        for binning in self.bins:
+            for rep in range(10):
+                for selection in np.linspace(0.001, 0.1, self.n_sims):
                     selection_priors.append(selection)
                     binnings.append(binning)
-                    start_values.append(start)
-                    bias_priors.append(bias)
+                    start_values.append(self.init_start)
+                    bias_priors.append(np.random.randint(0, 2))
 
         self.selection_priors = np.array(selection_priors)
         self.binnings = np.array(binnings)
@@ -200,6 +207,7 @@ class TestLoader(DataLoader):
         super().__init__(dataset, batch_size)
 
     def __iter__(self):
+        self.dataset.init_samples()
         while self.dataset.n_samples < len(self.dataset.data):
             samples = []
             while len(samples) < self.batch_size:

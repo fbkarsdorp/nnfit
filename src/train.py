@@ -12,7 +12,8 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
+from termcolor import colored
 
 from nets import FCN, LSTMFCN, ResNet
 from dataset import SimulationData, TestSimulationData, DataLoader, TestLoader
@@ -35,11 +36,18 @@ class Trainer:
         self.val_loss = []
         self.val_scores = []
 
-    def fit(self, n_epochs: int, learning_rate: float = 0.01, early_stop_patience: int = 10, lr_patience: int = 2):
+    def fit(
+        self,
+        n_epochs: int,
+        learning_rate: float = 0.01,
+        early_stop_patience: int = 10,
+        lr_patience: int = 2,
+        evaluation_maximum: float = 1.0,
+    ):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_patience, verbose=True)
-        # optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
-        best_val_loss = np.inf
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", patience=lr_patience, verbose=True)
+        best_val_score = -np.inf
         patience_counter = 0
         best_state_dict = None
 
@@ -62,10 +70,10 @@ class Trainer:
                 optimizer.step()
             self.train_loss.append(np.mean(train_loss))
 
-            val_loss, y_true, y_pred = [], [], []
+            val_loss, val_results = [], []
             with torch.no_grad():
                 self.model.eval()
-                for labels, _, _, inputs in self.val_loader:
+                for labels, ss, bs, inputs in self.val_loader:
                     labels, inputs = (
                         labels.to(self.device),
                         inputs.to(self.device).unsqueeze(1),
@@ -76,26 +84,39 @@ class Trainer:
                     )
                     val_loss.append(loss.item())
                     preds = (torch.sigmoid(outputs).cpu().numpy() > 0.5)
-                    y_pred.extend(preds.squeeze(1).astype(int).tolist())
-                    y_true.extend(labels.cpu().numpy().tolist())
+                    preds = preds.squeeze(1).astype(int).tolist()
+                    labels = labels.cpu().numpy().tolist()
+                    for i in range(len(preds)):
+                        val_results.append({
+                            "bin": bs[i].item(),
+                            "selection": ss[i].item(),
+                            "correct": int(preds[i] == labels[i]),
+                            "y_true": labels[i],
+                            "y_pred": preds[i],
+                        })
 
-            
-            self.val_scores.append(accuracy_score(y_true, y_pred))
+            df = pd.DataFrame(val_results)
+            self.val_scores.append(accuracy_score(
+                *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
 
-            lr_scheduler.step(self.val_loss[-1])
+            print(df.groupby('bin')['correct'].mean())
+            print(df.loc[df['selection'] == 0, 'correct'].mean())
+
+            lr_scheduler.step(self.val_scores[-1])
+
+            val_accuracy_string = colored(
+                f"{self.val_scores[-1]:.3f}", "red" if self.val_scores[-1] < best_val_score else "green")
 
             print(
-                f"Epoch: {epoch + 1}, "
+                f"Epoch {epoch + 1:2d}: "
                 f"Train loss: {self.train_loss[-1]:.3f}, "
                 f"Val loss: {self.val_loss[-1]:.3f}, "
-                f"Val accuracy: {self.val_scores[-1]:.3f} "
-                f"{'NEW BEST' if self.val_loss[-1] < best_val_loss else ''}"
+                f"Val accuracy: {val_accuracy_string}"
             )
-            print(classification_report(y_true, y_pred, digits=3))
-
-            if self.val_loss[-1] < best_val_loss:
-                best_val_loss = self.val_loss[-1]
+            
+            if self.val_scores[-1] > best_val_score:
+                best_val_score = self.val_scores[-1]
                 best_state_dict = self.model.state_dict()
                 patience_counter = 0
             else:
@@ -105,6 +126,7 @@ class Trainer:
                         self.model.load_state_dict(best_state_dict)
                     print("Early stopping...")
                     return self
+        writer.close()
         return self
 
     def save_model(self, savepath: Path) -> Path:
@@ -157,7 +179,7 @@ def run_experiment(args):
         distortion=val_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
-        varying_start_value=args.varying_start_value,
+        varying_start_value=False, #args.varying_start_value,
         n_sims=int(args.val_size * args.n_sims),
         n_agents=args.n_agents,
         timesteps=args.timesteps,
@@ -183,7 +205,8 @@ def run_experiment(args):
         model = ResNet(1).to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
-                lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience)
+                lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience,
+                evaluation_maximum=args.evaluation_maximum)
 
     run_id = str(uuid.uuid1())[:8] if args.outfile is None else args.outfile
 
@@ -197,7 +220,7 @@ def run_experiment(args):
         if args.distortion:
             test_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 2)
         test_data = TestSimulationData(
-            distorter=test_distortion,
+            distortion=test_distortion,
             variable_binning=args.variable_binning,
             start=args.start,
             n_sims=args.n_sims,
@@ -271,6 +294,12 @@ def get_arguments():
         type=int,
         default=64,
         help="Hidden size of LSTM network"
+    )
+    parser.add_argument(
+        "--evaluation_maximum",
+        type=float,
+        default=1,
+        help="Maximum selection strength used for validation evaluation."
     )
     parser.add_argument(
         "--num_layers",

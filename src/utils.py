@@ -1,3 +1,4 @@
+import operator
 import numbers
 import pickle
 
@@ -5,8 +6,8 @@ from hashlib import md5
 
 import os
 import numpy as np
-import scipy.stats as stats
 import pystan
+import scipy.stats as stats
 
 
 def check_random_state(seed):
