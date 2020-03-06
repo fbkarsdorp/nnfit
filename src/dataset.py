@@ -49,7 +49,7 @@ class SimulationBatch:
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self)
-        self.selection_priors = loguniform(low=0.001, high=1, size=n, random_state=self.rng) # TODO: not the same as scipy stats
+        self.selection_priors = loguniform(low=0.001, high=1, size=n, random_state=self.rng)
         self.bias_priors = self.rng.random(n)
         if self.varying_start_value:
             self.start = self.rng.uniform(0.001, 1, size=n)
