@@ -69,7 +69,7 @@ class FCN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.layers(x)
-        return self.final(x.mean(dim=-1))
+        return self.final(x.mean(dim=-1)) # GAP
 
 
 class LSTMFCN(nn.Module):
@@ -113,7 +113,7 @@ class LSTMFCN(nn.Module):
         x = x.transpose(2, 1)
         emb = torch.nn.functional.dropout(x, p=self.dropout, training=self.training)
         out, (hn, _) = self.lstm(emb)
-        return self.final(torch.cat([x_fcn.mean(dim=-1), hn[-1]], 1))
+        return self.final(torch.cat([x_fcn.mean(dim=-1), hn[-1]], 1)) # GAP
 
 
 class ResNet(nn.Module):
@@ -138,7 +138,7 @@ class ResNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore
         x = self.layers(x)
-        return self.final(x.mean(dim=-1))
+        return self.final(x.mean(dim=-1)) # GAP
 
 
 class ResNetBlock(nn.Module):
