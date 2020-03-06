@@ -1,17 +1,19 @@
+import concurrent
+
+from typing import Tuple, Dict
+
 import numpy as np
 import scipy.stats as stats
 import torch.utils.data
 
-from typing import Tuple
-from utils import apply_binning, Distorter, check_random_state
+from utils import apply_binning, Distorter, check_random_state, loguniform
 from simulation import wright_fisher
 from fit import frequency_increment_values
 
 
-class SimulationData:
+class SimulationBatch:
     def __init__(
         self,
-        selection_prior: Tuple[float, float] = (1, 5),
         distortion: Distorter = None,
         variable_binning=False,
         start: float = 0.5,
@@ -19,14 +21,12 @@ class SimulationData:
         n_sims: int = 1000,
         n_agents: int = 1000,
         timesteps: int = 200,
+        n_bins: int = None,
         seed: int = None,
         compute_fiv: bool = False,
-        train: bool = True,
-        min_bin_length: int = 4,
     ) -> None:
 
         self.rng = check_random_state(seed)
-        self.selection_prior = stats.loguniform(0.001, 1)
         self.distortion = distortion
         if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
@@ -36,18 +36,10 @@ class SimulationData:
         self.varying_start_value = varying_start_value
         self.n_agents = n_agents
         self.timesteps = timesteps
+        self.n_bins = n_bins
         self.compute_fiv = compute_fiv
-        self.train = train
         self.seed = seed
         self.n_samples = 0
-
-        # sample bins following Karjus
-        bins = {}
-        maxlen = np.ceil(timesteps / min_bin_length)
-        for i in range(1, int(maxlen + 1)):
-            bins[i] = int(np.ceil(timesteps / i))
-        bins = sorted(set(bins.values()))
-        self.bins = np.array(bins)
 
         self.set_priors()
 
@@ -57,28 +49,14 @@ class SimulationData:
     def set_priors(self) -> None:
         # Preset random values for reuse in validation
         n = len(self)
-        self.selection_priors = self.selection_prior.rvs(n, random_state=self.rng)
-        self.bias_priors = self.rng.rand(n)
+        self.selection_priors = loguniform(low=0.001, high=1, size=n, random_state=self.rng) # TODO: not the same as scipy stats
+        self.bias_priors = self.rng.random(n)
         if self.varying_start_value:
             self.start = self.rng.uniform(0.001, 1, size=n)
         else:
             self.start = np.full(n, self.start)
-        self.binnings = self.rng.choice(self.bins, size=n)
 
-    def reset(self):
-        self.n_samples = 0
-        if not self.train:
-            # Reinitialize Random Number Generator for consistent output
-            self.rng = check_random_state(self.seed)
-            # When using a distorter, reset it for consitent output in validation
-            if self.distortion is not None:
-                self.distortion.reset()
-        if self.train:
-            # For new pass over the data, we want new random settings
-            self.set_priors()
-        return self
-
-    def next(self, n_bins=None):
+    def _next(self):
         if self.n_samples < len(self.data):
             s = self.selection_priors[self.n_samples]
             if self.bias_priors[self.n_samples] < 0.5:
@@ -92,12 +70,9 @@ class SimulationData:
                 random_state=self.rng,
             )
 
-            # binning
-            if n_bins is None:
-                n_bins = self.binnings[self.n_samples]
             j = apply_binning(
                 j,
-                n_bins,
+                self.n_bins,
                 self.n_agents,
                 variable=self.variable,
                 random_state=self.rng,
@@ -113,12 +88,93 @@ class SimulationData:
             if self.compute_fiv:
                 j = frequency_increment_values(np.arange(1, len(j) + 1), j, clip=True)
 
-            return biased, s, n_bins, torch.FloatTensor(j)
+            return biased, s, self.n_bins, torch.FloatTensor(j)
 
         raise StopIteration
 
+    def next(self):
+        samples = []
+        while len(samples) < len(self):
+            try:
+                samples.append(self._next())
+            except StopIteration:
+                break
+        labels, selection, bins, outputs = zip(*samples)
+        return (
+            torch.LongTensor(labels),
+            torch.FloatTensor(selection),
+            torch.LongTensor(bins),
+            torch.stack(outputs),
+        )
 
-class TestSimulationData(SimulationData):
+
+class DataLoader:
+    def __init__(
+        self,
+        params: Dict,
+        batch_size: int = 1,
+        n_sims: int = 1000,
+        seed: int = None,
+        min_bin_length: int = 4,
+        train: bool = True,
+        n_workers: int = 1,
+    ) -> None:
+        
+        self.params = params
+        self.batch_size = batch_size
+        self.rng = check_random_state(seed)
+        self.seed = seed
+        self.n_sims = n_sims
+        self.train = train
+        self.n_workers = n_workers
+
+        # sample bins following Karjus
+        bins = {}
+        maxlen = np.ceil(params["timesteps"] / min_bin_length)
+        for i in range(1, int(maxlen + 1)):
+            bins[i] = int(np.ceil(params["timesteps"] / i))
+        bins = sorted(set(bins.values()))
+        self.bins = np.array(bins)
+
+        self.batch_seed_sequence = np.random.SeedSequence(seed)
+        self.seed = seed
+
+    def __iter__(self):
+        if not self.train:
+            self.batch_seed_sequence = np.random.SeedSequence(self.seed)
+            self.rng = check_random_state(self.seed)
+
+        bin_sizes = self.rng.choice(
+            self.bins, size=self.n_sims // self.batch_size
+        ).tolist()
+
+        with concurrent.futures.ProcessPoolExecutor(self.n_workers) as executor:
+            futures = [
+                executor.submit(
+                    SimulationBatch(
+                        variable_binning=self.params["variable_binning"],
+                        start=self.params["start"],
+                        varying_start_value=self.params["varying_start_value"],
+                        n_sims=self.batch_size,
+                        n_agents=self.params["n_agents"],
+                        timesteps=self.params["timesteps"],
+                        n_bins=bin_size,
+                        seed=np.random.default_rng(rng),
+                        compute_fiv=self.params["compute_fiv"],
+                    ).next
+                )
+                for bin_size, rng in zip(
+                    bin_sizes, self.batch_seed_sequence.spawn(len(bin_sizes))
+                )
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    yield future.result()
+                except Exception as exc:
+                    print('generated an exception: %s' % (exc,))
+
+# TODO: refactor
+class TestSimulationData(SimulationBatch):
     def __init__(
         self,
         distortion=None,
@@ -138,7 +194,7 @@ class TestSimulationData(SimulationData):
             n_agents=n_agents,
             timesteps=timesteps,
             train=False,
-            compute_fiv=compute_fiv
+            compute_fiv=compute_fiv,
         )
 
         self.n_sims = n_sims
@@ -150,7 +206,8 @@ class TestSimulationData(SimulationData):
 
         selection_priors, binnings, bias_priors, start_values = [], [], [], []
         selection_values = np.concatenate(
-            ([0], np.exp(np.linspace(np.log(0.001), np.log(1), 25 - 1))))
+            ([0], np.exp(np.linspace(np.log(0.001), np.log(1), 25 - 1)))
+        )
 
         for bias in (0, 1):
             for binning in self.bins:
@@ -167,42 +224,6 @@ class TestSimulationData(SimulationData):
         self.start = np.array(start_values)
 
         self.data = np.arange(len(self.binnings))
-
-
-class DataLoader:
-    def __init__(self, dataset: SimulationData, batch_size: int = 1, seed: int = None) -> None:
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.rng = check_random_state(seed)
-        self.seed = seed
-
-    def __iter__(self):
-        self.dataset.reset()
-        if not self.dataset.train:
-            self.rng = check_random_state(self.seed)
-
-        bin_sizes = self.rng.choice(
-            self.dataset.bins, size=len(self.dataset) // self.batch_size).tolist()
-
-        while bin_sizes:
-            n_bins = bin_sizes.pop()
-            samples = []
-            while len(samples) < self.batch_size:
-                try:
-                    samples.append(self.dataset.next(n_bins))
-                except StopIteration:
-                    break
-            yield self.collate(samples)
-
-
-    def collate(self, data):
-        labels, selection, bins, outputs = zip(*data)
-        return (
-            torch.LongTensor(labels),
-            torch.FloatTensor(selection),
-            torch.LongTensor(bins),
-            torch.stack(outputs),
-        )
 
 
 class TestLoader(DataLoader):

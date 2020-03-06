@@ -16,19 +16,14 @@ from sklearn.metrics import accuracy_score
 from termcolor import colored
 
 from nets import FCN, LSTMFCN, ResNet
-from dataset import SimulationData, TestSimulationData, DataLoader, TestLoader
+from dataset import TestSimulationData, DataLoader, TestLoader
 from utils import Distorter
 
 
 def make_seed():
     now = datetime.now()
     seed = now.hour * 10000 + now.minute * 100 + now.second
-    return seed
-
-
-def classification_report(df):
-    print(df.groupby('bin')['correct'].mean())
-    
+    return seed    
 
 
 class Trainer:
@@ -105,11 +100,10 @@ class Trainer:
                 *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
 
-            df['selection_bin'] = pd.cut(df['selection'], [-0.001, 0.001, 0.01, 0.1, 1])
-            print(df.sample(10).head())
+            df['selection_bin'] = pd.cut(df['selection'], [-0.001, 0.001, 0.005, 0.01, 0.1, 1])
             print(df.groupby('bin')['correct'].mean())
-            print(df.groupby('selection')['correct'].mean())
             print(df.groupby('selection_bin')['correct'].mean())
+            print(df[df["selection"] == 0].groupby("bin")['correct'].mean())
 
             lr_scheduler.step(self.val_scores[-1])
 
@@ -167,36 +161,43 @@ def run_experiment(args):
         train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
         val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
 
-    train_data = SimulationData(
-        selection_prior=args.selection_params,
+    train_params = dict(
         distortion=train_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
         varying_start_value=args.varying_start_value,
-        n_sims=args.n_sims,
         n_agents=args.n_agents,
         timesteps=args.timesteps,
-        seed=args.seed,
         compute_fiv=args.compute_frequency_increment_values,
     )
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
+    train_loader = DataLoader(
+        train_params,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        n_sims=args.n_sims,
+        train=True,
+        n_workers=args.n_workers,
+    )
 
-    val_data = SimulationData(
-        selection_prior=args.selection_params,
+    val_params = dict(
         distortion=val_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
-        varying_start_value=False, #args.varying_start_value,
-        n_sims=int(args.val_size * args.n_sims),
+        varying_start_value=args.varying_start_value,
         n_agents=args.n_agents,
         timesteps=args.timesteps,
-        seed=args.seed + 1,
-        train=False,
-        compute_fiv=args.compute_frequency_increment_values
+        compute_fiv=args.compute_frequency_increment_values,
     )
-
-    val_loader = DataLoader(val_data, batch_size=args.batch_size, seed=args.seed + 1)
+    
+    val_loader = DataLoader(
+        val_params,
+        batch_size=args.batch_size,
+        seed=args.seed + 1,
+        n_sims=int(args.val_size * args.n_sims),
+        train=False,
+        n_workers=args.n_workers,
+    )
 
     if args.cuda and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -340,13 +341,6 @@ def get_arguments():
     )
     parser.add_argument(
         "--variable_binning", action="store_true", help="Apply variable binning."
-    )
-    parser.add_argument(
-        "--selection_params",
-        type=float,
-        nargs=2,
-        default=(1, 5),
-        help="Alpha and Beta hyperparameter of the selection strength Beta distribution."
     )
     parser.add_argument(
         "--distortion",
