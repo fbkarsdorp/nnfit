@@ -68,22 +68,17 @@ def apply_binning(counts, n_bins, n_agents, variable=False, random_state=None):
 
 class Distorter:
     def __init__(self, loc=0, sd=0.2, seed=None):
-        self.prior = stats.norm(loc, sd)
+        self.loc = loc
+        self.sd = sd
         self.rng = check_random_state(seed)
-        self.seed = seed
 
     def _sample(self, n):
-        return self.prior.rvs(n, random_state=self.rng)
+        return self.rng.normal(self.loc, self.sd, n)
 
     def distort(self, values):
         values = np.array(values)
         distortion = self._sample(values.shape[0])
         return np.clip(values - distortion, 0, 1)
-
-    def reset(self):
-        loc, sd = self.prior.args
-        self.prior = stats.norm(loc, sd)
-        self.rng = check_random_state(self.seed)
 
 
 class suppress_stdout_stderr(object):

@@ -14,8 +14,8 @@ from fit import frequency_increment_values
 class SimulationBatch:
     def __init__(
         self,
-        distortion: Distorter = None,
-        variable_binning=False,
+        distortion: Tuple[float, float] = None,
+        variable_binning = False,
         start: float = 0.5,
         varying_start_value: bool = False,
         n_sims: int = 1000,
@@ -28,6 +28,8 @@ class SimulationBatch:
 
         self.rng = check_random_state(seed)
         self.distortion = distortion
+        if distortion is not None:
+            self.distortion = Distorter(*distortion, seed=self.rng)
         if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
         self.variable = variable_binning
@@ -114,6 +116,7 @@ class DataLoader:
         params: Dict,
         batch_size: int = 1,
         n_sims: int = 1000,
+        distortion: Tuple[float, float] = None,
         seed: int = None,
         min_bin_length: int = 4,
         train: bool = True,
@@ -124,6 +127,7 @@ class DataLoader:
         self.batch_size = batch_size
         self.rng = check_random_state(seed)
         self.seed = seed
+        self.distortion = distortion
         self.n_sims = n_sims
         self.train = train
         self.n_workers = n_workers
@@ -152,6 +156,7 @@ class DataLoader:
             futures = [
                 executor.submit(
                     SimulationBatch(
+                        distortion=self.distortion,
                         variable_binning=self.params["variable_binning"],
                         start=self.params["start"],
                         varying_start_value=self.params["varying_start_value"],

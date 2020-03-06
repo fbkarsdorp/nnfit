@@ -175,6 +175,7 @@ def run_experiment(args):
         train_params,
         batch_size=args.batch_size,
         seed=args.seed,
+        distortion=args.distortion,
         n_sims=args.n_sims,
         train=True,
         n_workers=args.n_workers,
@@ -194,6 +195,7 @@ def run_experiment(args):
         val_params,
         batch_size=args.batch_size,
         seed=args.seed + 1,
+        distortion=args.distortion,
         n_sims=int(args.val_size * args.n_sims),
         train=False,
         n_workers=args.n_workers,
@@ -344,8 +346,10 @@ def get_arguments():
     )
     parser.add_argument(
         "--distortion",
-        action="store_true",
-        help="Apply distortion to wright fisher simulations.",
+        type=float,
+        nargs=2,
+        default=None,
+        help="Apply distortion to wright fisher simulations sampled from d_i ~ N(loc, sd).",
     )
     parser.add_argument(
         "--distortion_sd",
