@@ -23,7 +23,7 @@ def check_random_state(seed):
 
 
 def loguniform(low=0, high=1, size=None, random_state=None):
-    rng = np.random if random_state is None else random_state
+    rng = check_random_state(random_state)
     return low * pow(high * 1.0 / low, rng.uniform(low, high, size))
 
 
