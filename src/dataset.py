@@ -153,6 +153,7 @@ class DataLoader:
             bins[i] = int(np.ceil(params["timesteps"] / i))
         bins = sorted(set(bins.values()))
         self.bins = np.array(bins)
+        self.bins = np.arange(4, params["timesteps"] + 1, 2)
 
         self.batch_seed_sequence = np.random.SeedSequence(seed)
         self.seed = seed
@@ -161,10 +162,11 @@ class DataLoader:
         if not self.train:
             self.batch_seed_sequence = np.random.SeedSequence(self.seed)
             self.rng = check_random_state(self.seed)
-
-        bin_sizes = self.rng.choice(
-            self.bins, size=self.n_sims // self.batch_size
-        ).tolist()
+            bin_sizes = self.bins[::int(self.params["timesteps"] / (self.n_sims // self.batch_size))]
+        else:
+            bin_sizes = self.rng.choice(
+                self.bins, replace=True, size=self.n_sims // self.batch_size
+            ).tolist()
 
         with concurrent.futures.ProcessPoolExecutor(self.n_workers) as executor:
             futures = [
@@ -188,10 +190,7 @@ class DataLoader:
                 )
             ]
             for future in concurrent.futures.as_completed(futures):
-                try:
-                    yield future.result()
-                except Exception as exc:
-                    print('generated an exception: %s' % (exc,))
+                yield future.result()
 
 # TODO: refactor
 class TestSimulationData(SimulationBatch):
