@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from sklearn.metrics import accuracy_score
 from termcolor import colored
 
-from nets import FCN, LSTMFCN, ResNet
+from nets import FCN, LSTMFCN, ResNet, InceptionTime
 from dataset import TestSimulationData, DataLoader, TestLoader
 from utils import Distorter
 
@@ -210,12 +210,16 @@ def run_experiment(args):
         device = torch.device("cpu")
 
     if args.model == "FCN":
-        model = FCN(1, 1).to(device)
+        model = FCN(1, 1)
     elif args.model == "LSTMFCN":
         model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
-                        args.dropout, args.rnn_dropout, args.bidirectional).to(device)
+                        args.dropout, args.rnn_dropout, args.bidirectional)
+    elif args.model == "INCEPTION":
+        model = InceptionTime(1, 1)
     else:
-        model = ResNet(1).to(device)
+        model = ResNet(1)
+
+    model = model.to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
                 lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience,
@@ -298,7 +302,7 @@ def get_arguments():
     parser.add_argument(
         "--model",
         type=str,
-        choices=("FCN", "LSTMFCN", "RESNET"),
+        choices=("FCN", "LSTMFCN", "RESNET", "INCEPTION"),
         default="FCN",
         help="Neural architecture for training."
     )
