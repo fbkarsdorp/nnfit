@@ -12,23 +12,18 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 from termcolor import colored
 
-from nets import FCN, LSTMFCN, ResNet
-from dataset import SimulationData, TestSimulationData, DataLoader, TestLoader
+from nets import FCN, LSTMFCN, ResNet, InceptionTime
+from dataset import TestSimulationData, DataLoader, TestLoader
 from utils import Distorter
 
 
 def make_seed():
     now = datetime.now()
     seed = now.hour * 10000 + now.minute * 100 + now.second
-    return seed
-
-
-def classification_report(df):
-    print(df.groupby('bin')['correct'].mean())
-    
+    return seed    
 
 
 class Trainer:
@@ -44,7 +39,7 @@ class Trainer:
     def fit(
         self,
         n_epochs: int,
-        learning_rate: float = 0.01,
+        learning_rate: float = 0.001,
         early_stop_patience: int = 10,
         lr_patience: int = 2,
         evaluation_maximum: float = 1.0,
@@ -56,11 +51,12 @@ class Trainer:
         patience_counter = 0
         best_state_dict = None
 
+        processed_bins = []
         for epoch in range(n_epochs):
             self.model.train()
 
             train_loss = []
-            for labels, _, _, inputs in self.train_loader:
+            for labels, _, bs, inputs in self.train_loader:
                 labels, inputs = (
                     labels.to(self.device),
                     inputs.to(self.device).unsqueeze(1),
@@ -72,8 +68,12 @@ class Trainer:
                 )
                 train_loss.append(loss.item())
                 loss.backward()
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                 optimizer.step()
+                processed_bins.extend(bs.numpy().tolist())
             self.train_loss.append(np.mean(train_loss))
+
+            print(pd.Series(processed_bins).value_counts().sort_index())
 
             val_loss, val_results = [], []
             with torch.no_grad():
@@ -105,11 +105,19 @@ class Trainer:
                 *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
 
-            df['selection_bin'] = pd.cut(df['selection'], [-0.001, 0.001, 0.01, 0.1, 1])
-            print(df.sample(10).head())
+            df['selection_bin'] = pd.cut(
+                df['selection'],
+                [-0.001, 0.001, 0.005, 0.01, 0.1, 1],
+                labels=["ß = 0", "0.001 ≤ ß ≤ 0.005", "0.005 ≤ ß ≤ 0.01", "0.01 ≤ ß ≤ 0.1", "0.1 ≤ ß ≤ 1"])
             print(df.groupby('bin')['correct'].mean())
-            print(df.groupby('selection')['correct'].mean())
             print(df.groupby('selection_bin')['correct'].mean())
+            print(df[df["selection"] == 0].groupby("bin")['correct'].mean())
+            print(df[df["bin"] == df["bin"].max()].groupby("selection_bin")["correct"].mean())
+            print(df[df["bin"] == df["bin"].min()].groupby("selection_bin")["correct"].mean())
+            print(classification_report(
+                *df.loc[
+                    (df["selection"] < 0.005) &
+                    (df["bin"] == df["bin"].max()), ["y_true", "y_pred"]].values.T))
 
             lr_scheduler.step(self.val_scores[-1])
 
@@ -134,11 +142,14 @@ class Trainer:
                         self.model.load_state_dict(best_state_dict)
                     print("Early stopping...")
                     return self
-        writer.close()
         return self
 
     def save_model(self, savepath: Path) -> Path:
-        torch.save(self.model.state_dict(), f'../results/{savepath}.pt')
+        model_dict = {
+            "args": self.model.input_args,
+            "state_dict": self.model.state_dict()
+        }
+        torch.save(model_dict, f'../results/{savepath}.pt')
         return savepath
 
     def evaluate(self, test_loader) -> Dict:
@@ -167,36 +178,47 @@ def run_experiment(args):
         train_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed)
         val_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 1)
 
-    train_data = SimulationData(
-        selection_prior=args.selection_params,
+    train_params = dict(
         distortion=train_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
         varying_start_value=args.varying_start_value,
-        n_sims=args.n_sims,
         n_agents=args.n_agents,
         timesteps=args.timesteps,
-        seed=args.seed,
         compute_fiv=args.compute_frequency_increment_values,
     )
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, seed=args.seed)
+    train_loader = DataLoader(
+        train_params,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        distortion=args.distortion,
+        n_sims=args.n_sims,
+        train=True,
+        n_workers=args.n_workers,
+        normalize_samples=args.normalize_samples,
+    )
 
-    val_data = SimulationData(
-        selection_prior=args.selection_params,
+    val_params = dict(
         distortion=val_distortion,
         variable_binning=args.variable_binning,
         start=args.start,
-        varying_start_value=False, #args.varying_start_value,
-        n_sims=int(args.val_size * args.n_sims),
+        varying_start_value=args.varying_start_value,
         n_agents=args.n_agents,
         timesteps=args.timesteps,
-        seed=args.seed + 1,
-        train=False,
-        compute_fiv=args.compute_frequency_increment_values
+        compute_fiv=args.compute_frequency_increment_values,
     )
-
-    val_loader = DataLoader(val_data, batch_size=args.batch_size, seed=args.seed + 1)
+    
+    val_loader = DataLoader(
+        val_params,
+        batch_size=args.batch_size,
+        seed=args.seed + 1,
+        distortion=args.distortion,
+        n_sims=int(args.val_size * args.n_sims),
+        train=False,
+        n_workers=args.n_workers,
+        normalize_samples=args.normalize_samples,
+    )
 
     if args.cuda and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -205,12 +227,16 @@ def run_experiment(args):
         device = torch.device("cpu")
 
     if args.model == "FCN":
-        model = FCN(1, 1).to(device)
+        model = FCN(1, 1)
     elif args.model == "LSTMFCN":
         model = LSTMFCN(args.hidden_size, 1, args.num_layers, 1,
-                        args.dropout, args.rnn_dropout, args.bidirectional).to(device)
+                        args.dropout, args.rnn_dropout, args.bidirectional)
+    elif args.model == "INCEPTION":
+        model = InceptionTime(1, 1)
     else:
-        model = ResNet(1).to(device)
+        model = ResNet(1)
+
+    model = model.to(device)
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
                 lr_patience=args.learning_rate_patience, early_stop_patience=args.early_stop_patience,
@@ -293,9 +319,14 @@ def get_arguments():
     parser.add_argument(
         "--model",
         type=str,
-        choices=("FCN", "LSTMFCN", "RESNET"),
+        choices=("FCN", "LSTMFCN", "RESNET", "INCEPTION"),
         default="FCN",
         help="Neural architecture for training."
+    )
+    parser.add_argument(
+        "--normalize_samples",
+        action="store_true",
+        help="Scale samples to unit norm."
     )
     parser.add_argument(
         "--hidden_size",
@@ -342,16 +373,11 @@ def get_arguments():
         "--variable_binning", action="store_true", help="Apply variable binning."
     )
     parser.add_argument(
-        "--selection_params",
+        "--distortion",
         type=float,
         nargs=2,
-        default=(1, 5),
-        help="Alpha and Beta hyperparameter of the selection strength Beta distribution."
-    )
-    parser.add_argument(
-        "--distortion",
-        action="store_true",
-        help="Apply distortion to wright fisher simulations.",
+        default=None,
+        help="Apply distortion to wright fisher simulations sampled from d_i ~ N(loc, sd).",
     )
     parser.add_argument(
         "--distortion_sd",

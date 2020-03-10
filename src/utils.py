@@ -3,11 +3,28 @@ import numbers
 import pickle
 
 from hashlib import md5
+from inspect import getargvalues, stack
 
 import os
 import numpy as np
 import pystan
 import scipy.stats as stats
+
+
+def get_arguments():
+    """Returns tuple containing dictionary of calling function's
+       named arguments and a list of calling function's unnamed
+       positional arguments.
+    """
+    posname, kwname, args = getargvalues(stack()[1][0])[-3:]
+    posargs = args.pop(posname, [])
+    args.update(args.pop(kwname, []))
+    if 'self' in args:
+        args['model'] = args['self'].__class__.__name__
+        del args['self']
+    if '__class__' in args:
+        del args['__class__']
+    return args
 
 
 def check_random_state(seed):
@@ -17,7 +34,14 @@ def check_random_state(seed):
         return np.random.RandomState(seed)
     if isinstance(seed, np.random.RandomState):
         return seed
+    if isinstance(seed, np.random.Generator):
+        return seed
     raise ValueError("%r cannot be used to seed a numpy.random.RandomState" " instance" % seed)
+
+
+def loguniform(low=0, high=1, size=None, random_state=None):
+    rng = check_random_state(random_state)
+    return low * pow(high * 1.0 / low, rng.uniform(low, high, size))
 
 
 class Prior:
@@ -61,22 +85,17 @@ def apply_binning(counts, n_bins, n_agents, variable=False, random_state=None):
 
 class Distorter:
     def __init__(self, loc=0, sd=0.2, seed=None):
-        self.prior = stats.norm(loc, sd)
+        self.loc = loc
+        self.sd = sd
         self.rng = check_random_state(seed)
-        self.seed = seed
 
     def _sample(self, n):
-        return self.prior.rvs(n, random_state=self.rng)
+        return self.rng.normal(self.loc, self.sd, n)
 
     def distort(self, values):
         values = np.array(values)
         distortion = self._sample(values.shape[0])
         return np.clip(values - distortion, 0, 1)
-
-    def reset(self):
-        loc, sd = self.prior.args
-        self.prior = stats.norm(loc, sd)
-        self.rng = check_random_state(self.seed)
 
 
 class suppress_stdout_stderr(object):
