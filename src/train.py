@@ -12,7 +12,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 from termcolor import colored
 
 from nets import FCN, LSTMFCN, ResNet, InceptionTime
@@ -39,7 +39,7 @@ class Trainer:
     def fit(
         self,
         n_epochs: int,
-        learning_rate: float = 0.01,
+        learning_rate: float = 0.001,
         early_stop_patience: int = 10,
         lr_patience: int = 2,
         evaluation_maximum: float = 1.0,
@@ -51,11 +51,12 @@ class Trainer:
         patience_counter = 0
         best_state_dict = None
 
+        processed_bins = []
         for epoch in range(n_epochs):
             self.model.train()
 
             train_loss = []
-            for labels, _, _, inputs in self.train_loader:
+            for labels, _, bs, inputs in self.train_loader:
                 labels, inputs = (
                     labels.to(self.device),
                     inputs.to(self.device).unsqueeze(1),
@@ -67,8 +68,12 @@ class Trainer:
                 )
                 train_loss.append(loss.item())
                 loss.backward()
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                 optimizer.step()
+                processed_bins.extend(bs.numpy().tolist())
             self.train_loss.append(np.mean(train_loss))
+
+            print(pd.Series(processed_bins).value_counts().sort_index())
 
             val_loss, val_results = [], []
             with torch.no_grad():
@@ -100,10 +105,19 @@ class Trainer:
                 *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
 
-            df['selection_bin'] = pd.cut(df['selection'], [-0.001, 0.001, 0.005, 0.01, 0.1, 1])
+            df['selection_bin'] = pd.cut(
+                df['selection'],
+                [-0.001, 0.001, 0.005, 0.01, 0.1, 1],
+                labels=["ß = 0", "0.001 ≤ ß ≤ 0.005", "0.005 ≤ ß ≤ 0.01", "0.01 ≤ ß ≤ 0.1", "0.1 ≤ ß ≤ 1"])
             print(df.groupby('bin')['correct'].mean())
             print(df.groupby('selection_bin')['correct'].mean())
             print(df[df["selection"] == 0].groupby("bin")['correct'].mean())
+            print(df[df["bin"] == df["bin"].max()].groupby("selection_bin")["correct"].mean())
+            print(df[df["bin"] == df["bin"].min()].groupby("selection_bin")["correct"].mean())
+            print(classification_report(
+                *df.loc[
+                    (df["selection"] < 0.005) &
+                    (df["bin"] == df["bin"].max()), ["y_true", "y_pred"]].values.T))
 
             lr_scheduler.step(self.val_scores[-1])
 
@@ -128,11 +142,14 @@ class Trainer:
                         self.model.load_state_dict(best_state_dict)
                     print("Early stopping...")
                     return self
-        writer.close()
         return self
 
     def save_model(self, savepath: Path) -> Path:
-        torch.save(self.model.state_dict(), f'../results/{savepath}.pt')
+        model_dict = {
+            "args": self.model.input_args,
+            "state_dict": self.model.state_dict()
+        }
+        torch.save(model_dict, f'../results/{savepath}.pt')
         return savepath
 
     def evaluate(self, test_loader) -> Dict:
