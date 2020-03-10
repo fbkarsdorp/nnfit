@@ -179,6 +179,7 @@ def run_experiment(args):
         n_sims=args.n_sims,
         train=True,
         n_workers=args.n_workers,
+        normalize_samples=args.normalize_samples,
     )
 
     val_params = dict(
@@ -199,6 +200,7 @@ def run_experiment(args):
         n_sims=int(args.val_size * args.n_sims),
         train=False,
         n_workers=args.n_workers,
+        normalize_samples=args.normalize_samples,
     )
 
     if args.cuda and torch.cuda.is_available():
@@ -299,6 +301,11 @@ def get_arguments():
         choices=("FCN", "LSTMFCN", "RESNET"),
         default="FCN",
         help="Neural architecture for training."
+    )
+    parser.add_argument(
+        "--normalize_samples",
+        action="store_true",
+        help="Scale samples to unit norm."
     )
     parser.add_argument(
         "--hidden_size",

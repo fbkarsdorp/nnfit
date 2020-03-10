@@ -24,6 +24,7 @@ class SimulationBatch:
         n_bins: int = None,
         seed: int = None,
         compute_fiv: bool = False,
+        normalize_samples: bool = False,
     ) -> None:
 
         self.rng = check_random_state(seed)
@@ -40,6 +41,7 @@ class SimulationBatch:
         self.timesteps = timesteps
         self.n_bins = n_bins
         self.compute_fiv = compute_fiv
+        self.normalize_samples = normalize_samples
         self.seed = seed
         self.n_samples = 0
 
@@ -101,11 +103,20 @@ class SimulationBatch:
             except StopIteration:
                 break
         labels, selection, bins, outputs = zip(*samples)
+        outputs = torch.stack(outputs)
+        if self.normalize_samples:
+            outputs = (
+                (outputs - outputs.mean(axis = 1, keepdims = True)) /
+                (outputs.std(axis = 1, keepdims = True) + 1e-8)
+            )
+        # TODO: add option for padding, which is required y ROCKET
+        # if self.pad_samples:
+        #     outputs = add_padding(outputs)
         return (
             torch.LongTensor(labels),
             torch.FloatTensor(selection),
             torch.LongTensor(bins),
-            torch.stack(outputs),
+            outputs,
         )
 
 
@@ -118,6 +129,7 @@ class DataLoader:
         distortion: Tuple[float, float] = None,
         seed: int = None,
         min_bin_length: int = 4,
+        normalize_samples: bool = False,
         train: bool = True,
         n_workers: int = 1,
     ) -> None:
@@ -127,6 +139,7 @@ class DataLoader:
         self.rng = check_random_state(seed)
         self.seed = seed
         self.distortion = distortion
+        self.normalize_samples = normalize_samples
         self.n_sims = n_sims
         self.train = train
         self.n_workers = n_workers
@@ -165,6 +178,7 @@ class DataLoader:
                         n_bins=bin_size,
                         seed=np.random.default_rng(rng),
                         compute_fiv=self.params["compute_fiv"],
+                        normalize_samples=self.normalize_samples,
                     ).next
                 )
                 for bin_size, rng in zip(
