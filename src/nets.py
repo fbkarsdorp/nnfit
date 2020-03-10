@@ -5,8 +5,9 @@ on https://github.com/cauchyturing/UCR_Time_Series_Classification_Deep_Learning_
 import torch
 import torch.nn as nn
 
-
 import torch.nn.functional as F
+
+from utils import get_arguments
 
 
 class Conv1dSamePadding(nn.Conv1d):
@@ -60,8 +61,10 @@ class FCN(nn.Module):
     def __init__(self, in_channels: int, num_classes: int = 1) -> None:
         super().__init__()
 
+        self.input_args = get_arguments()
+
         self.layers = nn.Sequential(
-            ConvBlock(in_channels, 128, 8, 1),
+            ConvBlock(in_channels, 128, 7, 1),
             ConvBlock(128, 256, 5, 1),
             ConvBlock(256, 128, 3, 1),
         )
@@ -84,6 +87,8 @@ class LSTMFCN(nn.Module):
         bidirectional: bool = False,
     ) -> None:
         super().__init__()
+
+        self.input_args = get_arguments()
 
         self.fcn = nn.Sequential(
             ConvBlock(in_channels, 128, 8, 1),
@@ -122,9 +127,12 @@ class ResNet(nn.Module):
                  num_pred_classes: int = 1) -> None:
         super().__init__()
 
+        self.input_args = get_arguments()
+
         # for easier saving and loading
         self.input_args = {
             'in_channels': in_channels,
+            "mid_channels": mid_channels,
             'num_pred_classes': num_pred_classes
         }
 

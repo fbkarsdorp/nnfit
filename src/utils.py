@@ -3,11 +3,28 @@ import numbers
 import pickle
 
 from hashlib import md5
+from inspect import getargvalues, stack
 
 import os
 import numpy as np
 import pystan
 import scipy.stats as stats
+
+
+def get_arguments():
+    """Returns tuple containing dictionary of calling function's
+       named arguments and a list of calling function's unnamed
+       positional arguments.
+    """
+    posname, kwname, args = getargvalues(stack()[1][0])[-3:]
+    posargs = args.pop(posname, [])
+    args.update(args.pop(kwname, []))
+    if 'self' in args:
+        args['model'] = args['self'].__class__.__name__
+        del args['self']
+    if '__class__' in args:
+        del args['__class__']
+    return args
 
 
 def check_random_state(seed):
