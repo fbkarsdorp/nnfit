@@ -52,18 +52,20 @@ class SimulationBatch:
 
     def set_priors(self) -> None:
         n = len(self)
-        self.selection_priors = loguniform(low=0.001, high=1, size=n, random_state=self.rng)
-        self.bias_priors = self.rng.random(n)
+        self.selection_priors = loguniform(low=0.001, high=1, size=n // 2, random_state=self.rng)
+        self.selection_priors = np.hstack((np.zeros(n // 2), self.selection_priors))
+        self.rng.shuffle(self.selection_priors)
+        # self.bias_priors = self.rng.random(n)
         if self.varying_start_value:
-            self.start = self.rng.uniform(0.001, 1, size=n)
+            self.start = self.rng.uniform(0.2, 0.8, size=n)
         else:
             self.start = np.full(n, self.start)
 
     def _next(self):
         if self.n_samples < len(self.data):
             s = self.selection_priors[self.n_samples]
-            if self.bias_priors[self.n_samples] < 0.5:
-                s = 0
+            # if self.bias_priors[self.n_samples] < 0.5:
+            #     s = 0
 
             j = wright_fisher(
                 self.n_agents,
