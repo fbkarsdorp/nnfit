@@ -152,10 +152,10 @@ class Trainer:
         torch.save(model_dict, f'../results/{savepath}.pt')
         return savepath
 
-    def evaluate(self, test_loader) -> Dict:
+    def evaluate(self, loader) -> Dict:
         self.model.eval()
         results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], "bins": []}
-        for labels, selection, bins, inputs in test_loader:
+        for labels, selection, bins, inputs in loader:
             with torch.no_grad():
                 labels, inputs = (
                     labels.to(self.device),
