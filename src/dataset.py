@@ -5,6 +5,7 @@ from typing import Tuple, Dict
 import numpy as np
 import scipy.stats as stats
 import torch.utils.data
+import torch.nn.functional as F
 
 from utils import apply_binning, Distorter, check_random_state, loguniform
 from simulation import wright_fisher
@@ -21,7 +22,6 @@ class SimulationBatch:
         n_sims: int = 1000,
         n_agents: int = 1000,
         timesteps: int = 200,
-        n_bins: int = None,
         seed: int = None,
         compute_fiv: bool = False,
         normalize_samples: bool = False,
@@ -34,12 +34,11 @@ class SimulationBatch:
         if variable_binning and self.distortion is None:
             raise ValueError("Variable binning requires distortion prior")
         self.variable = variable_binning
-        self.data = np.arange(n_sims)
+        self.n_sims = n_sims
         self.start = start
         self.varying_start_value = varying_start_value
         self.n_agents = n_agents
         self.timesteps = timesteps
-        self.n_bins = n_bins
         self.compute_fiv = compute_fiv
         self.normalize_samples = normalize_samples
         self.seed = seed
@@ -48,7 +47,7 @@ class SimulationBatch:
         self.set_priors()
 
     def __len__(self):
-        return self.data.shape[0]
+        return self.n_sims
 
     def set_priors(self) -> None:
         n = len(self)
@@ -60,9 +59,10 @@ class SimulationBatch:
             self.start = self.rng.uniform(0.2, 0.8, size=n)
         else:
             self.start = np.full(n, self.start)
+        self.bins = self.rng.choice(np.arange(4, self.timesteps + 1), size=len(self))
 
     def _next(self):
-        if self.n_samples < len(self.data):
+        if self.n_samples < len(self):
             s = self.selection_priors[self.n_samples]
             # if self.bias_priors[self.n_samples] < 0.5:
             #     s = 0
@@ -75,9 +75,10 @@ class SimulationBatch:
                 random_state=self.rng,
             )
 
+            n_bins = self.bins[self.n_samples]
             j = apply_binning(
                 j,
-                self.n_bins,
+                n_bins,
                 self.n_agents,
                 variable=self.variable,
                 random_state=self.rng,
@@ -93,7 +94,7 @@ class SimulationBatch:
             if self.compute_fiv:
                 j = frequency_increment_values(np.arange(1, len(j) + 1), j, clip=True)
 
-            return biased, s, self.n_bins, torch.FloatTensor(j)
+            return biased, s, n_bins, torch.FloatTensor(j)
 
         raise StopIteration
 
@@ -105,12 +106,14 @@ class SimulationBatch:
             except StopIteration:
                 break
         labels, selection, bins, outputs = zip(*samples)
-        outputs = torch.stack(outputs)
+
         if self.normalize_samples:
-            outputs = (
-                (outputs - outputs.mean(axis = 1, keepdims = True)) /
-                (outputs.std(axis = 1, keepdims = True) + 1e-8)
-            )
+            outputs = [(output - output.mean()) / (output.std() + 1e-8) for output in outputs]
+
+        length = max(output.size(0) for output in outputs)
+        outputs = [F.pad(output, (0, length - output.size(0))) for output in outputs]
+        outputs = torch.stack(outputs)
+        
         # TODO: add option for padding, which is required y ROCKET
         # if self.pad_samples:
         #     outputs = add_padding(outputs)
@@ -146,15 +149,6 @@ class DataLoader:
         self.train = train
         self.n_workers = n_workers
 
-        # sample bins following Karjus
-        bins = {}
-        maxlen = np.ceil(params["timesteps"] / min_bin_length)
-        for i in range(1, int(maxlen + 1)):
-            bins[i] = int(np.ceil(params["timesteps"] / i))
-        bins = sorted(set(bins.values()))
-        self.bins = np.array(bins)
-        self.bins = np.arange(4, params["timesteps"] + 1, 2)
-
         self.batch_seed_sequence = np.random.SeedSequence(seed)
         self.seed = seed
 
@@ -162,11 +156,6 @@ class DataLoader:
         if not self.train:
             self.batch_seed_sequence = np.random.SeedSequence(self.seed)
             self.rng = check_random_state(self.seed)
-            bin_sizes = self.bins[::int(self.params["timesteps"] / (self.n_sims // self.batch_size))]
-        else:
-            bin_sizes = self.rng.choice(
-                self.bins, replace=True, size=self.n_sims // self.batch_size
-            ).tolist()
 
         with concurrent.futures.ProcessPoolExecutor(self.n_workers) as executor:
             futures = [
@@ -179,15 +168,12 @@ class DataLoader:
                         n_sims=self.batch_size,
                         n_agents=self.params["n_agents"],
                         timesteps=self.params["timesteps"],
-                        n_bins=bin_size,
                         seed=np.random.default_rng(rng),
                         compute_fiv=self.params["compute_fiv"],
                         normalize_samples=self.normalize_samples,
                     ).next
                 )
-                for bin_size, rng in zip(
-                    bin_sizes, self.batch_seed_sequence.spawn(len(bin_sizes))
-                )
+                for rng in self.batch_seed_sequence.spawn(self.n_sims // self.batch_size)
             ]
             for future in concurrent.futures.as_completed(futures):
                 yield future.result()
