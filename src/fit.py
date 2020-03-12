@@ -3,12 +3,14 @@ import numpy as np
 import scipy.stats as stats
 
 from utils import suppress_stdout_stderr, StanModel_cache
+from numba import jit
 
 
+@jit(nopython=True)
 def frequency_increment_values(time, values, clip=False):
     if clip:
-        # see https://github.com/andreskarjus/wfsim_fit/blob/d08786771f168c6c263e88a6ffddbebe35bdaa2f/wfsim.R#L21
-        values = np.clip(values, 0.00001, 0.99999)
+        values[values < 0.00001] = 0.00001
+        values[values > 0.99999] = 0.99999
     n = len(time)
     Y = np.zeros(n - 1)
     for i in range(1, n):
