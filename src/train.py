@@ -216,6 +216,10 @@ def run_experiment(args):
 
     if args.test:
         print("Evaluating the model...")
+        if args.test_samples is not None:
+            print("Using precomputed test-samples...")
+        else:
+            print("Generating test samples...")
         test_samples = args.test_samples if args.test_samples is not None else generate_test_samples(
             args.timesteps, args.n_agents, args.n_workers
         )
