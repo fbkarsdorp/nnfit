@@ -31,7 +31,9 @@ def generate_test_samples(
     n_reps: int = 100,
     min_bin_length: int = 4,
     n_workers: int = 1,
+    seed: int = None,
 ):
+
     selection_values = np.concatenate(
         ([0], np.exp(np.linspace(np.log(0.001), np.log(1), 200 - 1)))
     )
