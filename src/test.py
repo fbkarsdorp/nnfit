@@ -7,11 +7,12 @@ import pandas as pd
 import scipy.stats
 import seaborn.cm as cm
 import torch
+import tqdm
 
 from matplotlib.ticker import ScalarFormatter, FuncFormatter
 from sklearn.metrics import accuracy_score, f1_score
 
-from fit import frequency_increment_test, frequency_increment_values
+from fit import frequency_increment_test
 from utils import apply_binning
 from simulation import wright_fisher
 
@@ -109,16 +110,12 @@ def evaluate_results(df, prefix=""):
             (df["selection"] < 0.005) &
             (df["bin"] == df["bin"].max()), ["y_true", "pred"]].values.T),
     }
-    
 
-def test_model(
-        model, samples, timesteps, n_agents, min_bin_length=4, device="cuda", normalize_samples=False):
 
+def test_fit(samples, timesteps, n_agents, min_bin_length=4):
     bins = get_bins(timesteps, min_bin_length)
-
-    nn_results, fit_results = [], []
-    for batch in samples:
-        data_dict = collections.defaultdict(list)
+    results = []
+    for batch in tqdm.tqdm(samples):
         for selection, data in batch:
             for bin_size in bins:
                 binned_data = apply_binning(data, bin_size, n_agents)
@@ -128,8 +125,23 @@ def test_model(
                 fit.update({"selection": selection, "bin": bin_size})
                 fit["pred"] = int(fit["Tp"] < 0.05)
                 fit["y_true"] = int(selection > 0)
-                fit_results.append(fit)
+                results.append(fit)
+    results = _clean_up_fit_results(pd.DataFrame(results))
+    scores = evaluate_results(results, prefix="FIT_")
+    return results, scores
 
+
+def test_model(
+        model, samples, timesteps, n_agents, min_bin_length=4, device="cuda", normalize_samples=False):
+
+    bins = get_bins(timesteps, min_bin_length)
+
+    nn_results = []
+    for batch in samples:
+        data_dict = collections.defaultdict(list)
+        for selection, data in batch:
+            for bin_size in bins:
+                binned_data = apply_binning(data, bin_size, n_agents)
                 if normalize_samples:
                     binned_data = np.array(binned_data)
                     binned_data = (binned_data - binned_data.mean()) / binned_data.std()
@@ -153,8 +165,7 @@ def test_model(
                     )
     
     nn_results = _clean_up_nn_results(pd.DataFrame(nn_results))
-    fit_results = _clean_up_fit_results(pd.DataFrame(fit_results))
-    return nn_results, fit_results
+    return nn_results
 
 
 def _plot_heat(df, bins, ax=None, ylabel=None, title=None, mask=None):

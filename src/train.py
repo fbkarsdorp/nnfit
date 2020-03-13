@@ -1,24 +1,21 @@
 import argparse
-import json
-import os
 import uuid
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 from termcolor import colored
 
 from dataset import DataLoader
 from nets import FCN, LSTMFCN, ResNet, InceptionTime
-from test import plot_parameter_sweep, test_model
-from test import evaluate_results, generate_test_samples, plot_fp_scores
+from test import test_model
+from test import evaluate_results, generate_test_samples
 from utils import Distorter
 
 
@@ -224,19 +221,13 @@ def run_experiment(args):
             args.timesteps, args.n_agents, args.n_workers
         )
             
-        nn_results, fit_results = test_model(
+        nn_results = test_model(
             model, test_samples, args.timesteps, args.n_agents,
             device=device, normalize_samples=args.normalize_samples
         )
         nn_scores = evaluate_results(nn_results, prefix="NN_")
-        fit_scores = evaluate_results(fit_results, prefix="FIT_")
-        
-        plot_parameter_sweep(fit_results, nn_results).savefig(
-            f"../results/{run_id}_params_sweep.png", dpi=300)
-        plot_fp_scores(fit_results, nn_results).savefig(
-            f"../results/{run_id}_fp_scores.png", dpi=300)
-        
-        return run_id, nn_scores, fit_scores
+                
+        return run_id, nn_results, nn_scores
         
 
 def get_arguments():

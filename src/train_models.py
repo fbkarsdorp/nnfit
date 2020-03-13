@@ -3,7 +3,8 @@ import os
 import pandas as pd
 
 from train import run_experiment, get_arguments
-from test import generate_test_samples
+from test import generate_test_samples, test_fit
+from test import plot_parameter_sweep, plot_fp_scores
 
 
 CONFIG = {
@@ -25,6 +26,8 @@ for n_agents in (1000, 5000, 10000):
     for timesteps in (200, 500, 1000):
         print(f"Generating test samples for N={n_agents} and T={timesteps}.")
         test_samples = generate_test_samples(timesteps, n_agents, 1000, n_workers=10)
+        print("Testing FIT preformance...")
+        fit_results, fit_scores = test_fit(test_samples, timesteps, n_agents)
         print("Starting model training...")
         for batch_size in (100, 200, 500):
             for model in ("RESNET", "FCN", "INCEPTION"):
@@ -47,7 +50,13 @@ for n_agents in (1000, 5000, 10000):
 
                         args.test_samples = test_samples
 
-                        run_id, nn_scores, fit_scores = run_experiment(args)
+                        run_id, nn_results, nn_scores = run_experiment(args)
+                        
+                        plot_parameter_sweep(fit_results, nn_results).savefig(
+                            f"../results/{run_id}_params_sweep.png", dpi=300)
+                        plot_fp_scores(fit_results, nn_results).savefig(
+                            f"../results/{run_id}_fp_scores.png", dpi=300)
+                        
                         dict_args.update(nn_scores)
                         dict_args.update(fit_scores)
                         dict_args["runid"] = run_id
