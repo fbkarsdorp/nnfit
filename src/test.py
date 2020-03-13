@@ -123,7 +123,7 @@ def test_model(
             for bin_size in bins:
                 binned_data = apply_binning(data, bin_size, n_agents)
                 fit = frequency_increment_test(
-                    np.arange(1, len(binned_data) + 1), binned_data
+                    np.arange(1, len(binned_data) + 1), np.array(binned_data)
                 )
                 fit.update({"selection": selection, "bin": bin_size})
                 fit["pred"] = int(fit["Tp"] < 0.05)
