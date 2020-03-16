@@ -112,20 +112,32 @@ def evaluate_results(df, prefix=""):
     }
 
 
-def test_fit(samples, timesteps, n_agents, min_bin_length=4):
+def _test_fit_batch(batch, bins, n_agents):
+    results = []
+    for selection, data in batch:
+        for bin_size in bins:
+            binned_data = apply_binning(data, bin_size, n_agents)
+            fit = frequency_increment_test(
+                np.arange(1, len(binned_data) + 1), np.array(binned_data)
+            )
+            fit.update({"selection": selection, "bin": bin_size})
+            fit["pred"] = int(fit["Tp"] < 0.05)
+            fit["y_true"] = int(selection > 0)
+            results.append(fit)
+    return results
+    
+
+def test_fit(samples, timesteps, n_agents, min_bin_length=4, n_workers=1):
     bins = get_bins(timesteps, min_bin_length)
     results = []
-    for batch in tqdm.tqdm(samples):
-        for selection, data in batch:
-            for bin_size in bins:
-                binned_data = apply_binning(data, bin_size, n_agents)
-                fit = frequency_increment_test(
-                    np.arange(1, len(binned_data) + 1), np.array(binned_data)
-                )
-                fit.update({"selection": selection, "bin": bin_size})
-                fit["pred"] = int(fit["Tp"] < 0.05)
-                fit["y_true"] = int(selection > 0)
-                results.append(fit)
+    if n_workers > len(samples):
+        n_workers = len(samples)
+
+    with concurrent.futures.ProcessPoolExecutor(n_workers) as executor:
+        futures = [executor.submit(_test_fit_batch, batch, bins, n_agents) for batch in samples]
+        for future in concurrent.futures.as_completed(futures):
+            results.extend(future.result())
+
     results = _clean_up_fit_results(pd.DataFrame(results))
     scores = evaluate_results(results, prefix="FIT_")
     return results, scores

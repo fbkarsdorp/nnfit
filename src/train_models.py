@@ -27,7 +27,7 @@ for n_agents in (1000, 5000, 10000):
         print(f"Generating test samples for N={n_agents} and T={timesteps}.")
         test_samples = generate_test_samples(timesteps, n_agents, 1000, n_workers=10)
         print("Testing FIT preformance...")
-        fit_results, fit_scores = test_fit(test_samples, timesteps, n_agents)
+        fit_results, fit_scores = test_fit(test_samples, timesteps, n_agents, n_workers=40)
         print("Starting model training...")
         for batch_size in (100, 200, 500):
             for model in ("RESNET", "FCN", "INCEPTION"):
