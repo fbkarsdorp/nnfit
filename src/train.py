@@ -1,22 +1,21 @@
 import argparse
-import json
-import os
 import uuid
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 from termcolor import colored
 
+from dataset import DataLoader
 from nets import FCN, LSTMFCN, ResNet, InceptionTime
-from dataset import TestSimulationData, DataLoader, TestLoader
+from test import test_model
+from test import evaluate_results, generate_test_samples
 from utils import Distorter
 
 
@@ -73,8 +72,6 @@ class Trainer:
                 processed_bins.extend(bs.numpy().tolist())
             self.train_loss.append(np.mean(train_loss))
 
-            print(pd.Series(processed_bins).value_counts().sort_index())
-
             val_loss, val_results = [], []
             with torch.no_grad():
                 self.model.eval()
@@ -104,20 +101,6 @@ class Trainer:
             self.val_scores.append(accuracy_score(
                 *df.loc[df['selection'] <= evaluation_maximum, ['y_true', 'y_pred']].values.T))
             self.val_loss.append(np.mean(val_loss))
-
-            df['selection_bin'] = pd.cut(
-                df['selection'],
-                [-0.001, 0.001, 0.005, 0.01, 0.1, 1],
-                labels=["ß = 0", "0.001 ≤ ß ≤ 0.005", "0.005 ≤ ß ≤ 0.01", "0.01 ≤ ß ≤ 0.1", "0.1 ≤ ß ≤ 1"])
-            print(df.groupby('bin')['correct'].mean())
-            print(df.groupby('selection_bin')['correct'].mean())
-            print(df[df["selection"] == 0].groupby("bin")['correct'].mean())
-            print(df[df["bin"] == df["bin"].max()].groupby("selection_bin")["correct"].mean())
-            print(df[df["bin"] == df["bin"].min()].groupby("selection_bin")["correct"].mean())
-            print(classification_report(
-                *df.loc[
-                    (df["selection"] < 0.005) &
-                    (df["bin"] == df["bin"].max()), ["y_true", "y_pred"]].values.T))
 
             lr_scheduler.step(self.val_scores[-1])
 
@@ -151,25 +134,6 @@ class Trainer:
         }
         torch.save(model_dict, f'../results/{savepath}.pt')
         return savepath
-
-    def evaluate(self, test_loader) -> Dict:
-        self.model.eval()
-        results = {"y_true": [], "y_pred": [], "probs": [], "selection": [], "bins": []}
-        for labels, selection, bins, inputs in test_loader:
-            with torch.no_grad():
-                labels, inputs = (
-                    labels.to(self.device),
-                    inputs.to(self.device).unsqueeze(1),
-                )
-                outputs = self.model(inputs)
-                probs = torch.sigmoid(outputs).cpu().numpy()
-                preds = (probs > 0.5).tolist()
-                results["y_pred"].extend(preds)
-                results["y_true"].extend(labels.cpu().numpy().tolist())
-                results["selection"].extend(selection.numpy().tolist())
-                results["bins"].extend(bins.numpy().tolist())
-                results["probs"].extend(probs.tolist())
-        return results
 
 
 def run_experiment(args):
@@ -248,39 +212,23 @@ def run_experiment(args):
     trainer.save_model(run_id)
 
     if args.test:
-        if not os.path.exists("../results"):
-            os.makedirs("../results")
-        test_distortion = None
-        if args.distortion:
-            test_distortion = Distorter(loc=0, sd=args.distortion_sd, seed=args.seed + 2)
-        test_data = TestSimulationData(
-            distortion=test_distortion,
-            variable_binning=args.variable_binning,
-            start=args.start,
-            n_sims=args.n_sims,
-            n_agents=args.n_agents,
-            timesteps=args.timesteps,
-            compute_fiv=args.compute_frequency_increment_values
+        print("Evaluating the model...")
+        if args.test_samples is not None:
+            print("Using precomputed test-samples...")
+        else:
+            print("Generating test samples...")
+        test_samples = args.test_samples if args.test_samples is not None else generate_test_samples(
+            args.timesteps, args.n_agents, args.n_workers
         )
-
-        test_loader = TestLoader(test_data, batch_size=args.batch_size)
-        results = trainer.evaluate(test_loader)
-        print(classification_report(results['y_true'], results['y_pred'], digits=3))
-        accuracy = accuracy_score(results['y_true'], results['y_pred'])
-
-        selection = np.array(results['selection'])
-        y_true, y_pred = np.array(results['y_true']), np.array(results['y_pred'])
-        indexes = (selection > 0) & (selection < 0.1)
-        accuracy_hard = accuracy_score(y_true[indexes], y_pred[indexes])
-        print(f"Accuracy on hard (0 < selection < 0.1) examples: {accuracy_hard:.3f}")
-
-        with open(f"../results/{run_id}.json", "w") as out:
-            arguments = vars(args)
-            arguments["accuracy"] = accuracy
-            arguments["accuracy_hard"] = accuracy_hard
-            json.dump(arguments, out)
-        pd.DataFrame(results).to_csv(f"../results/{run_id}.csv", index=False)
-
+            
+        nn_results = test_model(
+            model, test_samples, args.timesteps, args.n_agents,
+            device=device, normalize_samples=args.normalize_samples
+        )
+        nn_scores = evaluate_results(nn_results, prefix="NN_")
+                
+        return run_id, nn_results, nn_scores
+        
 
 def get_arguments():
     parser = argparse.ArgumentParser()

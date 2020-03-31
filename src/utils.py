@@ -28,8 +28,10 @@ def get_arguments():
 
 
 def check_random_state(seed):
-    if seed is None or seed is np.random:
+    if seed is np.random:
         return np.random.mtrand._rand
+    if seed is None:
+        return np.random.RandomState()
     if isinstance(seed, numbers.Integral):
         return np.random.RandomState(seed)
     if isinstance(seed, np.random.RandomState):

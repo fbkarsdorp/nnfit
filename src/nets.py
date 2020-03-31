@@ -178,7 +178,7 @@ class ResNetBlock(nn.Module):
         return self.layers(x)
 
 
-def noop(x):
+def identity(x):
     return x
 
 def shortcut(c_in, c_out):
@@ -189,7 +189,7 @@ class Inception(torch.nn.Module):
     def __init__(self, c_in, bottleneck=32, ks=40, nb_filters=32):
 
         super().__init__()
-        self.bottleneck = torch.nn.Conv1d(c_in, bottleneck, 1) if bottleneck and c_in > 1 else noop
+        self.bottleneck = torch.nn.Conv1d(c_in, bottleneck, 1) if bottleneck and c_in > 1 else identity
         mts_feat = bottleneck or c_in
         conv_layers = []
         kss = [ks // (2**i) for i in range(3)]
@@ -209,8 +209,10 @@ class Inception(torch.nn.Module):
         x = self.bottleneck(input_tensor)
         for i in range(3):
             out_ = self.conv_layers[i](x)
-            if i == 0: out = out_
-            else: out = torch.cat((out, out_), 1)
+            if i == 0:
+                out = out_
+            else:
+                out = torch.cat((out, out_), 1)
         mp = self.conv(self.maxpool(input_tensor))
         inc_out = torch.cat((out, mp), 1)
         return self.act(self.bn(inc_out))
@@ -230,12 +232,15 @@ class InceptionBlock(torch.nn.Module):
         res = 0
         for d in range(depth):
             inc_mods.append(
-                Inception(c_in if d == 0 else nb_filters * 4, bottleneck=bottleneck if d > 0 else 0, ks=ks,
+                Inception(c_in if d == 0 else nb_filters * 4,
+                          bottleneck=bottleneck if d > 0 else 0,
+                          ks=ks,
                           nb_filters=nb_filters))
             if self.residual and d % 3 == 2:
                 res_layers.append(shortcut(c_in if res == 0 else nb_filters * 4, nb_filters * 4))
                 res += 1
-            else: res_layer = res_layers.append(None)
+            else:
+                res_layer = res_layers.append(None)
         self.inc_mods = torch.nn.ModuleList(inc_mods)
         self.res_layers = torch.nn.ModuleList(res_layers)
         self.act = torch.nn.ReLU()
