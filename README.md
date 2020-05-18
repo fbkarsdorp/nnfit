@@ -20,7 +20,9 @@ https://github.com/mnewberry/ldrift. To run the past-tense analysis in
 
 ## Requirements
 All code is implemented in Python 3.7. A detailed list of the requirements to run the code
-can be found in the `requirements.txt` file.
+can be found in the `requirements.txt` file. This repository might be updated. To use the
+code used to run the analyses in the paper, please download the submission release:
+https://github.com/fbkarsdorp/nnfit/releases/tag/v1.0 
 
 ## Training
 
