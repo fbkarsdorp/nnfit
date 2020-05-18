@@ -1,4 +1,4 @@
-# Classifying Evolutionary Forces in Languages Change
+# Classifying Evolutionary Forces in Language Change
 
 A fundamental problem in research into language and cultural change is the difficulty of
 distinguishing processes of stochastic drift (also known as neutral evolution) from
