@@ -6,11 +6,11 @@ from utils import suppress_stdout_stderr, StanModel_cache
 from numba import jit
 
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def frequency_increment_values(time, values, clip=False):
     if clip:
-        values[values < 0.00001] = 0.00001
-        values[values > 0.99999] = 0.99999
+        values[values <= 0] = 0.001
+        values[values >= 1] = 0.999
     n = len(time)
     Y = np.zeros(n - 1)
     for i in range(1, n):
@@ -19,8 +19,8 @@ def frequency_increment_values(time, values, clip=False):
     return Y
 
 
-def frequency_increment_test(time, values):
-    Y = frequency_increment_values(time, values, clip=True)
+def frequency_increment_test(time, values, clip=True):
+    Y = frequency_increment_values(time, values, clip=clip)
     T, Tp = stats.ttest_1samp(Y, 0)
     W, Wp = stats.shapiro(Y)
     return {"T": T, "Tp": Tp, "W": W, "Wp": Wp}
