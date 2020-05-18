@@ -1,0 +1,12 @@
+numpy==1.18.1
+pandas==0.25.3
+pytorch==1.4.0
+tqdm==4.42.1
+matplotlib==3.1.2
+scikit-learn==0.22.1
+arviz==0.6.1
+scipy==1.4.1
+numba==0.47.0
+seaborn==0.10.0
+pystan==2.19.1.1
+termcolor==1.1.0
