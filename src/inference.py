@@ -113,7 +113,7 @@ class Trainer:
 
             print(
                 f"Epoch {epoch + 1:2d}: "
-                f"Train loss: {self.train_loss[-1]:.3f, "
+                f"Train loss: {self.train_loss[-1]:.3f}, "
                 f"Val loss: {val_loss_string}"
             )
 
