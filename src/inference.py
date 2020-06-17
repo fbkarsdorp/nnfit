@@ -11,31 +11,37 @@ import torch
 import torch.nn as nn
 
 from dataset import DataLoader
-from nets import ResNet
+from nets import ResNet, MultiLayerPerceptron, FCN
 from train import make_seed
 from utils import Distorter
 
+
 class ConditionalResNetRatioEstimator(nn.Module):
     def __init__(
-        self, in_channels: int, mid_channels: int = 64, num_pred_classes: int = 1
+            self, model, in_channels: int, mid_channels: int = 64, num_pred_classes: int = 1
     ):
         super().__init__()
 
-        self.net = ResNet(in_channels, mid_channels, num_pred_classes)
+        if model == "RESNET":
+            self.net = ResNet(in_channels, mid_channels, num_pred_classes)
+        else:
+            self.net = FCN(in_channels)
+        self.mlp = MultiLayerPerceptron(mid_channels * 2 + 1)
 
     def forward(self, inputs, outputs):
         log_ratio = self.log_ratio(inputs, outputs)
         return log_ratio.sigmoid(), log_ratio
 
     def log_ratio(self, inputs, outputs):
-        return self.net(torch.cat((inputs.view(-1, 1, 1), outputs), dim=2))
+        x = self.net(outputs)
+        return self.mlp(torch.cat((inputs.view(-1, 1), x), dim=1))
 
 
 class ConditionalRatioEstimator(nn.Module):
     def __init__(self, estimator, batch_size, device="cpu") -> None:
         super().__init__()
 
-        self.estimator = estimator
+        self.estimator = estimator.to(device)
         self.criterion = nn.BCELoss().to(device)
 
         chunked_batch_size = batch_size // 2
@@ -81,7 +87,7 @@ class Trainer:
         early_stop_patience: int = 10,
         lr_patience: int = 2,
     ):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", patience=lr_patience, verbose=True
         )
@@ -198,8 +204,10 @@ def run_experiment(args):
     else:
         device = torch.device("cpu")
 
-    estimator = ConditionalResNetRatioEstimator(1)
+    estimator = ConditionalResNetRatioEstimator(args.model, 1)
     model = ConditionalRatioEstimator(estimator, args.batch_size, device=device)
+
+    print(model)
 
     trainer = Trainer(model, train_loader, val_loader, device=device)
     trainer.fit(args.n_epochs, learning_rate=args.learning_rate,
@@ -219,6 +227,12 @@ def get_arguments():
         type=int,
         default=1000,
         help="Number of individuals/datapoints per generation.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="RESNET",
+        choices=["RESNET", "FCN"]
     )
     parser.add_argument(
         "--n_sims", type=int, default=1000, help="Number of simulations per epoch.",

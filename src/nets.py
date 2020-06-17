@@ -10,6 +10,30 @@ import torch.nn.functional as F
 from utils import get_arguments
 
 
+def make_mlp_layer(dropout, input_size, output_size):
+    mappings = [nn.ReLU(inplace=True)]
+    if dropout > 0:
+        mappings.append(nn.Dropout(dropout))
+    mappings.append(nn.Linear(input_size, output_size))
+    return nn.Sequential(*mappings)
+
+
+class MultiLayerPerceptron(nn.Module):
+    def __init__(self, input_size, layers=(128, 128, 128), dropout=0.0):
+        super().__init__()
+
+        mappings = [nn.Linear(input_size, layers[0])]
+        for i in range(1, len(layers)):
+            mappings.append(make_mlp_layer(dropout, layers[i - 1], layers[i]))
+
+        mappings.append(nn.ReLU(inplace=True))
+        mappings.append(nn.Linear(layers[-1], 1))
+        self.mappings = nn.Sequential(*mappings)
+
+    def forward(self, x):
+        return self.mappings(x)
+
+
 class Conv1dSamePadding(nn.Conv1d):
     def forward(self, input):
         return conv1d_same_padding(
@@ -68,11 +92,10 @@ class FCN(nn.Module):
             ConvBlock(128, 256, 5, 1),
             ConvBlock(256, 128, 3, 1),
         )
-        self.final = nn.Linear(128, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.layers(x)
-        return self.final(x.mean(dim=-1)) # GAP
+        return x.mean(dim=-1) # GAP
 
 
 class LSTMFCN(nn.Module):
@@ -142,11 +165,10 @@ class ResNet(nn.Module):
             ResNetBlock(in_channels=mid_channels * 2, out_channels=mid_channels * 2),
 
         ])
-        self.final = nn.Linear(mid_channels * 2, num_pred_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore
         x = self.layers(x)
-        return self.final(x.mean(dim=-1)) # GAP
+        return x.mean(dim=-1)
 
 
 class ResNetBlock(nn.Module):
