@@ -5,7 +5,6 @@ from typing import Tuple, Dict
 import numpy as np
 import scipy.stats as stats
 import torch.utils.data
-import torch.distributions
 import torch.nn.functional as F
 
 from utils import apply_binning, Distorter, check_random_state, loguniform
@@ -52,22 +51,22 @@ class SimulationBatch:
 
     def set_priors(self) -> None:
         n = len(self)
-        # self.selection_priors = loguniform(low=0.001, high=1, size=n // 2, random_state=self.rng)
-        self.selection_priors = torch.distributions.HalfNormal(0.1).sample((n, )).numpy()
-        # self.selection_priors = np.hstack((np.zeros(n // 2), self.selection_priors))
+        self.selection_priors = loguniform(low=0.001, high=1, size=n // 2, random_state=self.rng)
+        self.selection_priors = np.hstack((np.zeros(n // 2), self.selection_priors))
         self.rng.shuffle(self.selection_priors)
         # self.bias_priors = self.rng.random(n)
         if self.varying_start_value:
             self.start = self.rng.uniform(0.2, 0.8, size=n)
         else:
             self.start = np.full(n, self.start)
-        self.bins = self.rng.choice(np.arange(4, self.timesteps + 1), size=n)
+        self.bins = self.rng.choice(np.arange(4, self.timesteps + 1), size=len(self))
 
     def _next(self):
         if self.n_samples < len(self):
             s = self.selection_priors[self.n_samples]
             # if self.bias_priors[self.n_samples] < 0.5:
             #     s = 0
+
             j = wright_fisher(
                 self.n_agents,
                 self.timesteps,
@@ -115,6 +114,9 @@ class SimulationBatch:
         outputs = [F.pad(output, (0, length - output.size(0))) for output in outputs]
         outputs = torch.stack(outputs)
         
+        # TODO: add option for padding, which is required y ROCKET
+        # if self.pad_samples:
+        #     outputs = add_padding(outputs)
         return (
             torch.LongTensor(labels),
             torch.FloatTensor(selection),
