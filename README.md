@@ -12,6 +12,8 @@ model with a recently proposed statistical test, the Frequency Increment Test, a
 that the neural time series classification system provides a possible solution to some of
 the key problems of this test.
 
+Supplementary materials: ![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4061776.svg)](https://doi.org/10.5281/zenodo.4061776)
+
 ## Data
 
 Code to reconstruct the past-tense data set can be obtained from
