@@ -1,4 +1,4 @@
-# [Classifying Evolutionary Forces in Language Change](https://doi.org/10.1017/ehs.2020.52)
+# [Classifying Evolutionary Forces in Language Change Using Neural Networks](https://doi.org/10.1017/ehs.2020.52)
 
 A fundamental problem in research into language and cultural change is the difficulty of
 distinguishing processes of stochastic drift (also known as neutral evolution) from
