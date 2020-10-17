@@ -13,6 +13,7 @@ that the neural time series classification system provides a possible solution t
 the key problems of this test.
 
 Article: https://doi.org/10.1017/ehs.2020.52
+
 Supplementary materials: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4061776.svg)](https://doi.org/10.5281/zenodo.4061776)
 
 ## Data
