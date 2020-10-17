@@ -1,4 +1,4 @@
-# Classifying Evolutionary Forces in Language Change
+# [Classifying Evolutionary Forces in Language Change](https://doi.org/10.1017/ehs.2020.52)
 
 A fundamental problem in research into language and cultural change is the difficulty of
 distinguishing processes of stochastic drift (also known as neutral evolution) from
@@ -12,9 +12,11 @@ model with a recently proposed statistical test, the Frequency Increment Test, a
 that the neural time series classification system provides a possible solution to some of
 the key problems of this test.
 
-Article: https://doi.org/10.1017/ehs.2020.52
+DOI: https://doi.org/10.1017/ehs.2020.52
 
-Supplementary materials: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4061776.svg)](https://doi.org/10.5281/zenodo.4061776)
+## Getting started
+See the [supplementary materials](https://doi.org/10.5281/zenodo.4061776) for a brief tutorial
+describing how to train your own models.
 
 ## Data
 
