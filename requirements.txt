@@ -5,7 +5,7 @@ tqdm==4.42.1
 matplotlib==3.1.2
 scikit-learn==0.22.1
 arviz==0.6.1
-scipy==1.4.1
+scipy==1.10.0
 numba==0.47.0
 seaborn==0.10.0
 pystan==2.19.1.1
